@@ -6,8 +6,10 @@ function App() {
   const [bag, setBag] = useState(null);
   const [selected, setSelected] = useState(null);
   const [content, setContent] = useState("nothing here");
+  const [isLoading, setIsLoading] = useState(false);
 
   const runPythonScript = async () => {
+    setIsLoading(true);
     const response = await fetch("http://localhost:5000/run-script", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -15,7 +17,8 @@ function App() {
     });
 
     const data = await response.json();
-    setContent(data.stdout);
+    setContent(JSON.stringify(data, null, 2));
+    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -24,11 +27,14 @@ function App() {
     }
   }, [bag]);
 
+  useEffect(() => {});
+
   const buttonClass = (ind) => {
     return selected === ind ? "selected-button" : "button-css";
   };
 
   const updateSelected = (event, ind) => {
+    if (isLoading) return;
     setSelected(ind);
     setBag(event.target.textContent);
     console.log(event.target.textContent);
@@ -43,25 +49,27 @@ function App() {
     <div className="App">
       <div className="parent">
         {[
-          "file1.dbs",
-          "file2.dbs",
-          "file3.dbs",
-          "file4.dbs",
-          "file5.dbs",
-          "file6.dbs",
-          "file7.dbs",
+          "360_scans_per_cloud",
+          "180_scans_per_cloud",
+          "90_scans_per_cloud",
+          "test",
+          "chair",
+          "whiteboard",
         ].map((file, index) => (
           <button
             key={index}
             className={buttonClass(index)}
             onClick={(e) => updateSelected(e, index)}
+            disabled={isLoading}
           >
             {file}
           </button>
         ))}
+        {isLoading && <div className="spinner"></div>}
       </div>
+
       <div>
-        <Select options={tools} />
+        <Select options={tools} disabled={isLoading} />
         <textarea className="text" value={content} disabled={true}></textarea>
       </div>
     </div>
