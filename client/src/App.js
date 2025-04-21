@@ -1,12 +1,27 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Select from "react-select";
+import UploadBag from "./UploadBag";
 
 function App() {
   const [bag, setBag] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [JSONList, setJSONList] = useState(null);
   const [content, setContent] = useState("nothing here");
   const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleList = (list) => {
+    setJSONList(list);
+  };
+
+  const handleLoad = (state) => {
+    setIsLoading(state);
+  };
+  /*
+  const handleLoading = (list) => {
+    setIsLoading(list);
+  };*/
 
   const runPythonScript = async () => {
     setIsLoading(true);
@@ -17,8 +32,12 @@ function App() {
     });
 
     const data = await response.json();
-    setContent(JSON.stringify(data, null, 2));
+    setJSONList(data);
     setIsLoading(false);
+  };
+
+  const handleButtonClick = () => {
+    fileInputRef.current.click();
   };
 
   useEffect(() => {
@@ -27,7 +46,18 @@ function App() {
     }
   }, [bag]);
 
-  useEffect(() => {});
+  useEffect(() => {
+    if (!JSONList || JSONList.length === 0) return;
+
+    let currentIndex = 0;
+
+    const interval = setInterval(() => {
+      setContent(JSON.stringify(JSONList[currentIndex], null, 2));
+      currentIndex = (currentIndex + 1) % JSONList.length;
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [JSONList]);
 
   const buttonClass = (ind) => {
     return selected === ind ? "selected-button" : "button-css";
@@ -48,14 +78,7 @@ function App() {
   return (
     <div className="App">
       <div className="parent">
-        {[
-          "360_scans_per_cloud",
-          "180_scans_per_cloud",
-          "90_scans_per_cloud",
-          "test",
-          "chair",
-          "whiteboard",
-        ].map((file, index) => (
+        {[].map((file, index) => (
           <button
             key={index}
             className={buttonClass(index)}
@@ -65,6 +88,9 @@ function App() {
             {file}
           </button>
         ))}
+
+        <UploadBag JSONList={handleList} loading={handleLoad} />
+
         {isLoading && <div className="spinner"></div>}
       </div>
 

@@ -1,0 +1,21 @@
+.upload-button {
+  background-color: #0039a2; /* Green background */
+  color: white; /* White text */
+  padding: 12px 24px; /* Padding for size */
+  font-size: 16px; /* Font size */
+  border: none; /* Remove border */
+  border-radius: 8px; /* Rounded corners */
+  cursor: pointer; /* Pointer cursor on hover */
+  transition: background-color 0.2s ease, transform 0.1s ease; /* Smooth transitions */
+}
+
+.upload-button:hover {
+  background-color: #002b7a; /* Darker green on hover */
+  transform: scale(1.02); /* Slightly enlarge on hover */
+}
+
+.upload-button:disabled {
+  background-color: #cccccc; /* Gray background for disabled state */
+  color: #666666; /* Darker gray text */
+  cursor: not-allowed; /* Not-allowed cursor */
+}

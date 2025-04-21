@@ -34,8 +34,8 @@ def bag_to_json(bag_path, json_path):
         json.dump(all_messages, f, indent=2)
 
 if __name__ == '__main__':
-    bag_file_path = f'/home/ajay/Programming/bag/unilidar_3d/rosbags/{sys.argv[1]}' # rosbag directory
-    json_file_path = f'/home/ajay/Programming/visualizationtoolbox/server/saved_data/{sys.argv[1]}.json' # JSON save directory
+    bag_file_path = f'uploads-folder/{sys.argv[1]}' # rosbag directory
+    json_file_path = f'saved_data/{sys.argv[1]}.json' # JSON save directory
     try:
         bag_to_json(bag_file_path, json_file_path)
     except Exception as e:
