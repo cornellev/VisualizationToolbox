@@ -1,0 +1,10 @@
+{
+  "watch": ["server.js", "script.py", "routes", "utils"],
+  "ignore": [
+    "uploads-folder",
+    "temp-uploads",
+    "saved_data",
+    "saved_compressed"
+  ],
+  "ext": "js,json"
+}

@@ -1,0 +1,15 @@
+FROM node:20
+
+WORKDIR /app
+
+COPY server/package*.json ./server/
+RUN cd server && npm install
+
+COPY server/ ./server/
+COPY --from=frontend-builder /app/client/build ./server/public
+
+WORKDIR /app/server
+
+EXPOSE 5000
+
+CMD ["node", "server.js"]

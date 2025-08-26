@@ -2,38 +2,75 @@ import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Select from "react-select";
 import UploadBag from "./UploadBag";
+import pako from "pako";
 
 function App() {
   const [bag, setBag] = useState(null);
+  const [bagList, setBagList] = useState(null);
   const [selected, setSelected] = useState(null);
   const [JSONList, setJSONList] = useState(null);
   const [content, setContent] = useState("nothing here");
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef(null);
 
-  const handleList = (list) => {
-    setJSONList(list);
+  const handleList = (folderName) => {
+    setBag(folderName);
   };
 
   const handleLoad = (state) => {
     setIsLoading(state);
   };
-  /*
-  const handleLoading = (list) => {
-    setIsLoading(list);
-  };*/
 
-  const runPythonScript = async () => {
+  const handleBagSelect = (selectedOption) => {
+    setSelected(selectedOption);
+    setBag(selectedOption.label.replace(".json.gz", "")); // set bag name without extension
+  };
+
+  // Fetch the list of available .gz files from GitHub
+  const fetchBagList = async () => {
+    const url =
+      "https://api.github.com/repos/AjayParthibha/ReplayDashData/contents/data"; // change path if needed
+    try {
+      const response = await fetch(url);
+      const files = await response.json();
+
+      const gzFiles = files
+        .filter((file) => file.name.endsWith(".json.gz"))
+        .map((file) => ({
+          label: file.name,
+          value: file.download_url, // directly store download URL
+        }));
+
+      setBagList(gzFiles);
+    } catch (error) {
+      console.error("Failed to fetch bag list:", error);
+    }
+  };
+
+  const fetchAndVisualize = async () => {
+    if (!bag) {
+      alert("No bag selected!");
+      return;
+    }
+
     setIsLoading(true);
-    const response = await fetch("http://localhost:5000/run-script", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ param: bag }),
-    });
+    const url = `https://raw.githubusercontent.com/AjayParthibha/ReplayDashData/main/data/${bag}.json.gz`;
 
-    const data = await response.json();
-    setJSONList(data);
-    setIsLoading(false);
+    try {
+      const response = await fetch(url);
+      const compressedData = await response.arrayBuffer();
+
+      const decompressed = pako.inflate(new Uint8Array(compressedData), {
+        to: "string",
+      });
+      const data = JSON.parse(decompressed);
+
+      setJSONList(data);
+    } catch (error) {
+      console.error("Error fetching and decompressing:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleButtonClick = () => {
@@ -41,10 +78,8 @@ function App() {
   };
 
   useEffect(() => {
-    if (bag !== null) {
-      runPythonScript();
-    }
-  }, [bag]);
+    fetchBagList(); // run once on page load
+  }, []);
 
   useEffect(() => {
     if (!JSONList || JSONList.length === 0) return;
@@ -78,18 +113,22 @@ function App() {
   return (
     <div className="App">
       <div className="parent">
-        {[].map((file, index) => (
-          <button
-            key={index}
-            className={buttonClass(index)}
-            onClick={(e) => updateSelected(e, index)}
-            disabled={isLoading}
-          >
-            {file}
-          </button>
-        ))}
+        <UploadBag onUploadComplete={handleList} loading={handleLoad} />
 
-        <UploadBag JSONList={handleList} loading={handleLoad} />
+        <Select
+          options={bagList}
+          onChange={handleBagSelect}
+          isDisabled={isLoading}
+          placeholder="Select a ROSBag to visualize"
+        />
+
+        <button
+          onClick={fetchAndVisualize}
+          className="button-css"
+          disabled={isLoading}
+        >
+          Fetch and Visualize
+        </button>
 
         {isLoading && <div className="spinner"></div>}
       </div>

@@ -4,6 +4,7 @@ from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 import json
 import sys
+import os
 
 def bag_to_json(bag_path, json_path):
     reader = rosbag2_py.SequentialReader()
@@ -34,8 +35,17 @@ def bag_to_json(bag_path, json_path):
         json.dump(all_messages, f, indent=2)
 
 if __name__ == '__main__':
-    bag_file_path = f'uploads-folder/{sys.argv[1]}' # rosbag directory
-    json_file_path = f'saved_data/{sys.argv[1]}.json' # JSON save directory
+    folder = sys.argv[1]
+    folder_path = os.path.join('uploads-folder', folder)
+
+    db3_file = next((f for f in os.listdir(folder_path) if f.endswith(".db3")), None)
+    if not db3_file:
+        print("Error: No .db3 file found in folder")
+        sys.exit(1)
+
+    bag_file_path = os.path.join(folder_path, db3_file)
+    json_file_path = f'saved_data/{folder}.json'
+
     try:
         bag_to_json(bag_file_path, json_file_path)
     except Exception as e:
