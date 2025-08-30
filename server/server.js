@@ -48,7 +48,7 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
     console.log("FILES RECEIVED:", req.files);
   } else {
     console.log("No files received");
-    res.status(400).send("Error during upload");
+    return res.status(400).send("Error during upload");
   }
 
   if (!req.files || req.files.length < 2) {
@@ -65,14 +65,21 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const fileBaseName = `${folderName}_${timestamp}`;
   const finalFolderPath = path.join("uploads-folder", folderName);
+  const pyworkerUrl = process.env.PYWORKER_URL || "http://pyworker:8000";
 
   try {
+    // Save uploaded files into final folder
     await fs.promises.mkdir(finalFolderPath, { recursive: true });
 
+    const fsExtra = require("fs-extra"); // or just use fs/promises
+
     await Promise.all(
-      req.files.map((file) => {
+      req.files.map(async (file) => {
         const dest = path.join(finalFolderPath, file.originalname);
-        return fs.promises.rename(file.path, dest);
+        // Copy file to final folder
+        await fs.promises.copyFile(file.path, dest);
+        // Delete the original temp file
+        await fs.promises.unlink(file.path);
       })
     );
 
@@ -80,81 +87,67 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
     console.log("Files saved in:", finalFolderPath);
   } catch (err) {
     console.error("Error organizing files:", err);
-    res.status(500).send("Internal server error while organizing files.");
+    return res
+      .status(500)
+      .send("Internal server error while organizing files.");
   }
 
   try {
-    const python = spawn("python3", ["script.py", folderName]);
+    const response = await axios.post(`${pyworkerUrl}/process/${folderName}`);
+    console.log("Pyworker response:", response.data);
 
-    python.stdout.on("data", (data) => {
-      console.log(`stdout: ${data}`);
-    });
+    const jsonFilePath = `saved_data/${folderName}.json`;
+    const compressedPath = `saved_compressed/${folderName}.json.gz`;
 
-    python.stderr.on("data", (data) => {
-      console.error(`stderr: ${data}`);
-    });
+    const jsonData = await fs.promises.readFile(jsonFilePath, "utf-8");
+    const compressed = zlib.gzipSync(jsonData);
+    await fs.promises.writeFile(compressedPath, compressed);
 
-    python.on("close", async (code) => {
-      const jsonFilePath = `saved_data/${folderName}.json`;
-      const compressedPath = `saved_compressed/${folderName}.json.gz`;
+    console.log("Compressed and saved to:", compressedPath);
 
-      try {
-        const jsonData = fs.readFileSync(jsonFilePath, "utf-8");
-        const compressed = zlib.gzipSync(jsonData);
-        await fs.promises.writeFile(compressedPath, compressed);
+    const githubPath = `data/${fileBaseName}.json.gz`;
+    const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${githubPath}`;
 
-        console.log("Compressed and saved to:", compressedPath);
-
-        const githubPath = `data/${fileBaseName}.json.gz`;
-        const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${githubPath}`;
-
-        // check for existing file
-        let sha;
-        try {
-          const existing = await axios.get(url, {
-            headers: { Authorization: `token ${GITHUB_TOKEN}` },
-          });
-          sha = existing.data.sha;
-        } catch (err) {
-          if (!(err.response && err.response.status === 404)) {
-            console.error(
-              "GitHub check failed:",
-              err.response?.data || err.message
-            );
-            return res.status(500).json({ error: "GitHub pre-check failed" });
-          }
-        }
-
-        await axios.put(
-          url,
-          {
-            message: `Upload ${folderName}.json.gz`,
-            content: compressed.toString("base64"),
-            branch: GITHUB_BRANCH,
-            ...(sha && { sha }),
-          },
-          {
-            headers: {
-              Authorization: `token ${GITHUB_TOKEN}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        console.log(`Uploaded ${githubPath} to GitHub repo.`);
-        res.json({ message: "Upload complete", folder: fileBaseName });
-      } catch (err) {
+    // Check for existing file
+    let sha;
+    try {
+      const existing = await axios.get(url, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` },
+      });
+      sha = existing.data.sha;
+    } catch (err) {
+      if (!(err.response && err.response.status === 404)) {
         console.error(
-          "Upload pipeline failed:",
+          "GitHub check failed:",
           err.response?.data || err.message
         );
-        if (!res.headersSent) {
-          res.status(500).json({ error: "Failed after compression/upload" });
-        }
+        return res.status(500).json({ error: "GitHub pre-check failed" });
       }
-    });
+    }
+
+    await axios.put(
+      url,
+      {
+        message: `Upload ${folderName}.json.gz`,
+        content: compressed.toString("base64"),
+        branch: GITHUB_BRANCH,
+        ...(sha && { sha }),
+      },
+      {
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(`Uploaded ${githubPath} to GitHub repo.`);
+    res.json({ message: "Upload complete", folder: fileBaseName });
   } catch (err) {
-    console.error("Background processing failed:", err);
+    console.error("Upload pipeline failed:", err.response?.data || err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed after compression/upload" });
+    }
   }
 });
 

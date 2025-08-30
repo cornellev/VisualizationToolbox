@@ -14,7 +14,6 @@ function UploadBag({ onUploadComplete, loading }) {
         return;
       }
       const formData = new FormData();
-      const firstPath = files[0].webkitRelativePath;
 
       for (const file of files) {
         formData.append("files", file);

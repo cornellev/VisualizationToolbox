@@ -73,10 +73,6 @@ function App() {
     }
   };
 
-  const handleButtonClick = () => {
-    fileInputRef.current.click();
-  };
-
   useEffect(() => {
     fetchBagList(); // run once on page load
   }, []);
@@ -93,17 +89,6 @@ function App() {
 
     return () => clearInterval(interval);
   }, [JSONList]);
-
-  const buttonClass = (ind) => {
-    return selected === ind ? "selected-button" : "button-css";
-  };
-
-  const updateSelected = (event, ind) => {
-    if (isLoading) return;
-    setSelected(ind);
-    setBag(event.target.textContent);
-    console.log(event.target.textContent);
-  };
 
   const tools = [
     { value: "pointcloud", label: "Point Cloud" },
