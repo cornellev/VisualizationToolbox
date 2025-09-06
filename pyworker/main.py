@@ -19,9 +19,8 @@ def process(folder_name: str):
             cwd=BASE_DIR,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         return {"message": "Processing complete", "output": result.stdout}
     except subprocess.CalledProcessError as e:
         return {"error": e.stderr, "stdout": e.stdout}
-

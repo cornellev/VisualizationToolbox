@@ -1,4 +1,5 @@
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -6,16 +7,12 @@ const path = require("path");
 const multer = require("multer");
 const zlib = require("zlib");
 const axios = require("axios");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 require("dotenv").config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-const GITHUB_USERNAME = "AjayParthibha";
-const GITHUB_REPO = "ReplayDashData";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_BRANCH = "main";
 
 app.use((req, _, next) => {
   console.log(
@@ -28,6 +25,22 @@ app.use((req, _, next) => {
   next();
 });
 
+const PYWORKER_URL = process.env.PYWORKER_URL || "http://pyworker:8000";
+const shinyProxy = createProxyMiddleware({
+  target: PYWORKER_URL,
+  changeOrigin: false, 
+  ws: true,            
+  pathRewrite: { "^/ev/?": "/" },
+  timeout: 120000,       
+  proxyTimeout: 120000,  
+});
+app.use("/ev", shinyProxy);
+
+const GITHUB_USERNAME = "AjayParthibha";
+const GITHUB_REPO = "ReplayDashData";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_BRANCH = "main";
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = "temp-uploads";
@@ -39,7 +52,6 @@ const storage = multer.diskStorage({
     cb(null, file.originalname);
   },
 });
-
 const upload = multer({ storage });
 
 app.post("/upload-folder", upload.array("files"), async (req, res) => {
@@ -56,7 +68,6 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
   }
 
   const db3File = req.files.find((file) => file.originalname.endsWith(".db3"));
-
   if (!db3File) {
     return res.status(400).send("No .db3 file found in upload.");
   }
@@ -71,14 +82,10 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
     // Save uploaded files into final folder
     await fs.promises.mkdir(finalFolderPath, { recursive: true });
 
-    const fsExtra = require("fs-extra"); // or just use fs/promises
-
     await Promise.all(
       req.files.map(async (file) => {
         const dest = path.join(finalFolderPath, file.originalname);
-        // Copy file to final folder
         await fs.promises.copyFile(file.path, dest);
-        // Delete the original temp file
         await fs.promises.unlink(file.path);
       })
     );
@@ -108,7 +115,6 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
     const githubPath = `data/${fileBaseName}.json.gz`;
     const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${githubPath}`;
 
-    // Check for existing file
     let sha;
     try {
       const existing = await axios.get(url, {
@@ -151,14 +157,19 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
   }
 });
 
-app.listen(5000, () => {
-  console.log("Server running on http://localhost:5000");
+const PORT = process.env.PORT || 5000;
+const server = http.createServer(app);
+
+// Attach websocket upgrade handling for the /ev proxy
+server.on("upgrade", shinyProxy.upgrade);
+
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
 });
-
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason);
 });
