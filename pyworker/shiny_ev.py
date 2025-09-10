@@ -1,6 +1,7 @@
 from shiny import App, ui, reactive, render
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
 def to_numeric(s: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(s):
@@ -19,28 +20,10 @@ app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.h2("Run Data Analysis"),
         ui.input_file("csv", "Upload a File", accept=[".csv"], multiple=False),
-        ui.input_radio_buttons(
-            "mode",
-            "Plot mode",
-            choices={
-                "speed_time": "Speed vs Time (gps_speed vs lap_obc_timestamp)",
-                "energy_dist": "Energy vs Distance (lap_jm3_netjoule vs dist)",
-            },
-            selected="speed_time",
-        ),
         ui.hr(),
-        ui.h4("Axis options"),
-        ui.input_checkbox("zero_time", "Zero time to start (t = 0)", value=True),
-        ui.input_checkbox("zero_dist", "Zero distance to start (x = 0)", value=True),
-        ui.input_checkbox("drop_na", "Drop NA rows", value=True),
-        ui.hr(),
-        ui.h4("Required columns"),
-        ui.tags.ul(
-            ui.tags.li(ui.tags.code("gps_speed"), " (km/h)"),
-            ui.tags.li(ui.tags.code("lap_obc_timestamp"), " (epoch seconds or numeric)"),
-            ui.tags.li(ui.tags.code("lap_jm3_netjoule"), " (Joules)"),
-            ui.tags.li(ui.tags.code("dist"), " (meters)"),
-        ),
+        ui.h4("Select axes"),
+        ui.output_ui("x_select"),
+        ui.output_ui("y_select"),
         open="open",
     ),
     ui.layout_column_wrap(
@@ -68,35 +51,90 @@ def server(input, output, session):
             return ui.p("Upload a CSV/JSON to begin.")
         return ui.HTML(d.head(12).to_html(index=False))
 
+    def numeric_like_columns(_df: pd.DataFrame) -> list[str]:
+        cols: list[str] = []
+        for c in _df.columns:
+            s = _df[c]
+            if pd.api.types.is_numeric_dtype(s):
+                sn = s
+            else:
+                sn = pd.to_numeric(s, errors="coerce")
+
+            # Drop NA to assess content
+            sn_non_na = sn.dropna()
+            if sn_non_na.empty:
+                continue
+
+            # Skip columns that are all zeros (within tolerance)
+            if np.all(np.isclose(sn_non_na.to_numpy(), 0.0, rtol=0.0, atol=0.0)):
+                continue
+
+            cols.append(c)
+        return cols
+
+    @render.ui
+    def x_select():
+        d = df()
+        if d is None or d.empty:
+            return ui.input_select("xcol", "X Axis", choices=[])
+        num_cols = numeric_like_columns(d)
+        preferred = ["lap_obc_timestamp", "timestamp", "time", "dist", "distance"]
+        default = next((c for c in preferred if c in num_cols), (num_cols[0] if num_cols else None))
+        return ui.input_select("xcol", "X Axis", choices=num_cols, selected=default)
+
+    @render.ui
+    def y_select():
+        d = df()
+        if d is None or d.empty:
+            return ui.input_select("ycol", "Y Axis", choices=[])
+        num_cols = numeric_like_columns(d)
+        preferred = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
+        default = next((c for c in preferred if c in num_cols), (num_cols[1] if len(num_cols) > 1 else (num_cols[0] if num_cols else None)))
+        return ui.input_select("ycol", "Y Axis", choices=num_cols, selected=default)
+
     @render.ui
     def plot():
         d = df()
         if d is None or d.empty:
             return ui.HTML("Upload a CSV/JSON to begin.")
 
-        required = ["gps_speed", "lap_obc_timestamp", "lap_jm3_netjoule", "dist"]
-        missing = [c for c in required if c not in d.columns]
-        if missing:
-            return ui.HTML(f"<b>Missing required columns:</b> {', '.join(missing)}")
+        # Determine X/Y columns from inputs or sensible defaults
+        def pick_defaults(cols: list[str]) -> tuple[str | None, str | None]:
+            if not cols:
+                return None, None
+            pref_x = ["lap_obc_timestamp", "timestamp", "time", "dist", "distance"]
+            x_def = next((c for c in pref_x if c in cols), cols[0])
+            pref_y = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
+            y_def = next((c for c in pref_y if c in cols and c != x_def), None)
+            if y_def is None:
+                rem = [c for c in cols if c != x_def]
+                y_def = rem[0] if rem else x_def
+            return x_def, y_def
 
-        if input.mode() == "speed_time":
-            x = to_numeric(d["lap_obc_timestamp"])
-            if input.zero_time():
-                x = zero_to_start(x)
-            y = to_numeric(d["gps_speed"])
-            xlab = "Time (s from start)" if input.zero_time() else "lap_obc_timestamp"
-            ylab = "Vehicle Speed (km/h)"
-        else:
-            x = to_numeric(d["dist"])
-            if input.zero_dist():
-                x = zero_to_start(x)
-            y = to_numeric(d["lap_jm3_netjoule"])
-            xlab = "Distance (m from start)" if input.zero_dist() else "dist"
-            ylab = "Energy (J)"
+        num_cols = numeric_like_columns(d)
+        try:
+            xcol = input.xcol()
+        except Exception:
+            xcol = None
+        try:
+            ycol = input.ycol()
+        except Exception:
+            ycol = None
+        def_x, def_y = pick_defaults(num_cols)
+        xcol = xcol if xcol in d.columns else def_x
+        ycol = ycol if ycol in d.columns else def_y
+        if xcol is None or ycol is None:
+            return ui.HTML("No suitable numeric columns to plot.")
 
-        out = pd.DataFrame({"x": x, "y": y})
-        if input.drop_na():
-            out = out.dropna(subset=["x", "y"])
+        x = to_numeric(d[xcol])
+        y = to_numeric(d[ycol])
+        x_name = xcol.lower()
+        if ("time" in x_name or "timestamp" in x_name or "dist" in x_name or "distance" in x_name):
+            x = zero_to_start(x)
+        xlab = f"{xcol}"
+        ylab = f"{ycol}"
+
+        out = pd.DataFrame({"x": x, "y": y}).dropna(subset=["x", "y"])  # Always drop NAs
 
         fig = px.line(out, x="x", y="y")
         fig.update_layout(
@@ -105,7 +143,6 @@ def server(input, output, session):
             yaxis_title=ylab,
         )
 
-        # Return a self-contained Plotly HTML snippet
         html = fig.to_html(include_plotlyjs="cdn", full_html=False)
         return ui.HTML(html)
 
