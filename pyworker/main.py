@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 import subprocess
 import os
+from shiny import App as ShinyApp
+from shiny_ev import app as shiny_app
 
 app = FastAPI()
 
@@ -30,3 +32,4 @@ def run_process(folder_name: str):
         return {"error": e.stderr, "stdout": e.stdout}
 
 
+app.mount("/ev", shiny_app)

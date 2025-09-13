@@ -31,7 +31,7 @@ for attempt in range(max_retries):
             host=DB_HOST,
             port=DB_PORT,
         )
-        print("✅ Connected to Postgres")
+        print("Connected to Postgres")
         break
     except psycopg2.OperationalError as e:
         print(f"DB not ready (attempt {attempt+1}/{max_retries}): {e}")

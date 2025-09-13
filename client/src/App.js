@@ -5,7 +5,7 @@ import UploadBag from "./UploadBag";
 import pako from "pako";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = `${API_BASE}/ev/`;
+const EV_URL = `http://localhost:8000/ev/`;
 
 function DataViewer() {
   const [bag, setBag] = useState(null);
