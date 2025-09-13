@@ -4,7 +4,10 @@ import Select from "react-select";
 import UploadBag from "./UploadBag";
 import pako from "pako";
 
-function App() {
+const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
+const EV_URL = `${API_BASE}/ev/`;
+
+function DataViewer() {
   const [bag, setBag] = useState(null);
   const [bagList, setBagList] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -13,17 +16,14 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef(null);
 
-  const handleList = (folderName) => {
-    setBag(folderName);
-  };
+  const [activeTab, setActiveTab] = useState("dynamic");
 
-  const handleLoad = (state) => {
-    setIsLoading(state);
-  };
+  const handleList = (folderName) => setBag(folderName);
+  const handleLoad = (state) => setIsLoading(state);
 
-  const handleBagSelect = (selectedOption) => {
-    setSelected(selectedOption);
-    setBag(selectedOption.label.replace(".json.gz", "")); // set bag name without extension
+  const handleBagSelect = (opt) => {
+    setSelected(opt);
+    setBag(opt.label.replace(".json.gz", ""));
   };
 
   const fetchBagList = async () => {
@@ -48,7 +48,6 @@ function App() {
       alert("No bag selected!");
       return;
     }
-
     setIsLoading(true);
 
     try {
@@ -66,20 +65,17 @@ function App() {
   };
 
   useEffect(() => {
-    fetchBagList(); // run once on page load
+    fetchBagList();
   }, []);
 
   useEffect(() => {
     if (!JSONList || JSONList.length === 0) return;
-
-    let currentIndex = 0;
-
-    const interval = setInterval(() => {
-      setContent(JSON.stringify(JSONList[currentIndex], null, 2));
-      currentIndex = (currentIndex + 1) % JSONList.length;
+    let i = 0;
+    const id = setInterval(() => {
+      setContent(JSON.stringify(JSONList[i], null, 2));
+      i = (i + 1) % JSONList.length;
     }, 100);
-
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, [JSONList]);
 
   const tools = [
@@ -88,7 +84,7 @@ function App() {
   ];
 
   return (
-    <div className="App">
+    <>
       <div className="parent">
         <UploadBag onUploadComplete={handleList} loading={handleLoad} />
 
@@ -109,13 +105,60 @@ function App() {
 
         {isLoading && <div className="spinner"></div>}
       </div>
+      <div className="right-pane">
+        <div className="tabs" style={{ marginBottom: 12 }}>
+          <button
+            onClick={() => setActiveTab("dynamic")}
+            className={`tab ${activeTab === "dynamic" ? "active" : ""}`}
+            aria-selected={activeTab === "dynamic"}
+            role="tab"
+          >
+            Dynamic
+          </button>
+          <button
+            onClick={() => setActiveTab("static")}
+            className={`tab ${activeTab === "static" ? "active" : ""}`}
+            aria-selected={activeTab === "static"}
+            role="tab"
+          >
+            Static
+          </button>
+        </div>
 
-      <div>
-        <Select options={tools} disabled={isLoading} />
-        <textarea className="text" value={content} disabled={true}></textarea>
+        {activeTab === "dynamic" ? (
+          <>
+            <Select options={tools} isDisabled={isLoading} />
+            <textarea
+              className="text"
+              value={content}
+              disabled={true}
+            ></textarea>
+          </>
+        ) : (
+          <div style={{ height: "70vh", width: "100%" }}>
+            <iframe
+              title="Run Data Analysis"
+              src={EV_URL}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                borderRadius: 8,
+                boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
+                background: "#fff",
+              }}
+            />
+          </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <div className="App">
+      <DataViewer />
+    </div>
+  );
+}

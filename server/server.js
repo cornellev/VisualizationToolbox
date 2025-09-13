@@ -1,9 +1,11 @@
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
 const axios = require("axios");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 require("dotenv").config();
 const pool = require("./db");
 
@@ -18,7 +20,6 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => cb(null, file.originalname),
 });
-
 const upload = multer({ storage });
 
 app.post("/upload-folder", upload.array("files"), async (req, res) => {

@@ -1,3 +1,7 @@
 uvicorn[standard]
 fastapi[all]
 psycopg2-binary
+pandas
+plotly
+shiny>=1.0.0
+python-dateutil

@@ -1,6 +1,5 @@
 FROM ros:humble
 
-# Install Python deps
 RUN apt-get update && apt-get install -y python3-pip python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,5 +16,4 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Copy rest of the code
 COPY . .
 
-# Default command
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["shiny", "run", "--host", "0.0.0.0", "--port", "8000", "shiny_main.py"]
