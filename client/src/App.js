@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import "./App.css";
 import Select from "react-select";
 import UploadBag from "./UploadBag";
+import PointCloudPlayer from "./PointCloudPlayer";
 import pako from "pako";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
@@ -28,7 +29,7 @@ function DataViewer() {
 
   const fetchBagList = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/rosbags"); // adjust your backend URL
+      const response = await fetch(API_BASE + "/api/rosbags"); // adjust your backend URL
       const data = await response.json();
 
       // data is expected to be an array of objects: [{ folder_name: "rosbag1" }, ...]
@@ -52,7 +53,7 @@ function DataViewer() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/rosbags/${bag}` // endpoint returns JSON for folder_name
+        API_BASE + `/api/rosbags/${bag}` // endpoint returns JSON for folder_name
       );
       const data = await response.json();
 
@@ -128,11 +129,7 @@ function DataViewer() {
         {activeTab === "dynamic" ? (
           <>
             <Select options={tools} isDisabled={isLoading} />
-            <textarea
-              className="text"
-              value={content}
-              disabled={true}
-            ></textarea>
+            <PointCloudPlayer jsonFrames={JSONList || []} />
           </>
         ) : (
           <div style={{ height: "70vh", width: "100%" }}>
