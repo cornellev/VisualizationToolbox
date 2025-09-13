@@ -1,164 +1,112 @@
 const express = require("express");
 const cors = require("cors");
-const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
-const zlib = require("zlib");
 const axios = require("axios");
 require("dotenv").config();
+const pool = require("./db");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const GITHUB_USERNAME = "AjayParthibha";
-const GITHUB_REPO = "ReplayDashData";
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_BRANCH = "main";
-
-app.use((req, _, next) => {
-  console.log(
-    new Date().toISOString(),
-    req.method,
-    req.url,
-    req.body,
-    req.files
-  );
-  next();
-});
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = "temp-uploads";
-    fs.mkdir(tempDir, { recursive: true }, (err) => {
-      cb(err, tempDir);
-    });
+    fs.mkdir(tempDir, { recursive: true }, (err) => cb(err, tempDir));
   },
-  filename: (req, file, cb) => {
-    cb(null, file.originalname);
-  },
+  filename: (req, file, cb) => cb(null, file.originalname),
 });
 
 const upload = multer({ storage });
 
 app.post("/upload-folder", upload.array("files"), async (req, res) => {
-  console.log("Setting up /upload-folder endpoint...");
-  if (req.files) {
-    console.log("FILES RECEIVED:", req.files);
-  } else {
-    console.log("No files received");
-    return res.status(400).send("Error during upload");
-  }
-
   if (!req.files || req.files.length < 2) {
-    return res.status(400).send("Need yaml and db3 in the folder");
+    return res.status(400).send("Need at least a YAML and DB3 file");
   }
 
-  const db3File = req.files.find((file) => file.originalname.endsWith(".db3"));
-
-  if (!db3File) {
-    return res.status(400).send("No .db3 file found in upload.");
-  }
+  const db3File = req.files.find((f) => f.originalname.endsWith(".db3"));
+  if (!db3File) return res.status(400).send("No .db3 file found");
 
   const folderName = path.parse(db3File.originalname).name;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const fileBaseName = `${folderName}_${timestamp}`;
   const finalFolderPath = path.join("uploads-folder", folderName);
   const pyworkerUrl = process.env.PYWORKER_URL || "http://pyworker:8000";
 
   try {
-    // Save uploaded files into final folder
     await fs.promises.mkdir(finalFolderPath, { recursive: true });
-
-    const fsExtra = require("fs-extra"); // or just use fs/promises
 
     await Promise.all(
       req.files.map(async (file) => {
         const dest = path.join(finalFolderPath, file.originalname);
-        // Copy file to final folder
         await fs.promises.copyFile(file.path, dest);
-        // Delete the original temp file
         await fs.promises.unlink(file.path);
       })
     );
 
-    console.log("Created folder:", folderName);
-    console.log("Files saved in:", finalFolderPath);
-  } catch (err) {
-    console.error("Error organizing files:", err);
-    return res
-      .status(500)
-      .send("Internal server error while organizing files.");
-  }
+    console.log(
+      `Created folder: ${folderName}, files saved in ${finalFolderPath}`
+    );
 
-  try {
+    // Call pyworker to process the bag
     const response = await axios.post(`${pyworkerUrl}/process/${folderName}`);
     console.log("Pyworker response:", response.data);
 
-    const jsonFilePath = `saved_data/${folderName}.json`;
-    const compressedPath = `saved_compressed/${folderName}.json.gz`;
-
-    const jsonData = await fs.promises.readFile(jsonFilePath, "utf-8");
-    const compressed = zlib.gzipSync(jsonData);
-    await fs.promises.writeFile(compressedPath, compressed);
-
-    console.log("Compressed and saved to:", compressedPath);
-
-    const githubPath = `data/${fileBaseName}.json.gz`;
-    const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${githubPath}`;
-
-    // Check for existing file
-    let sha;
-    try {
-      const existing = await axios.get(url, {
-        headers: { Authorization: `token ${GITHUB_TOKEN}` },
-      });
-      sha = existing.data.sha;
-    } catch (err) {
-      if (!(err.response && err.response.status === 404)) {
-        console.error(
-          "GitHub check failed:",
-          err.response?.data || err.message
-        );
-        return res.status(500).json({ error: "GitHub pre-check failed" });
-      }
-    }
-
-    await axios.put(
-      url,
-      {
-        message: `Upload ${folderName}.json.gz`,
-        content: compressed.toString("base64"),
-        branch: GITHUB_BRANCH,
-        ...(sha && { sha }),
-      },
-      {
-        headers: {
-          Authorization: `token ${GITHUB_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log(`Uploaded ${githubPath} to GitHub repo.`);
-    res.json({ message: "Upload complete", folder: fileBaseName });
+    // Return success directly; pyworker already inserted into DB
+    res.json({
+      message: "Upload and processing complete",
+      folder: folderName,
+      pyworker: response.data,
+    });
   } catch (err) {
-    console.error("Upload pipeline failed:", err.response?.data || err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Failed after compression/upload" });
-    }
+    console.error("Upload pipeline failed:", err.message || err);
+    if (!res.headersSent)
+      res.status(500).json({ error: "Failed uploading or processing" });
   }
 });
 
-app.listen(5000, () => {
-  console.log("Server running on http://localhost:5000");
+app.listen(5000, () => console.log("Server running on http://localhost:5000"));
+
+process.on("uncaughtException", (err) =>
+  console.error("Uncaught Exception:", err)
+);
+process.on("unhandledRejection", (reason) =>
+  console.error("Unhandled Rejection:", reason)
+);
+
+// GET /api/rosbags
+app.get("/api/rosbags", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT folder_name FROM rosbags ORDER BY created_at DESC"
+    );
+    res.json(result.rows); // [{ folder_name: 'rosbag1' }, ...]
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch rosbags" });
+  }
 });
 
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err);
-});
+// GET /api/rosbags/:folderName
+app.get("/api/rosbags/:folderName", async (req, res) => {
+  const { folderName } = req.params;
+  try {
+    // Fetch all messages for the given folder
+    const result = await pool.query(
+      `SELECT topic, timestamp, data
+       FROM rosbag_messages
+       WHERE bag_name = $1
+       ORDER BY timestamp ASC`,
+      [folderName]
+    );
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection:", reason);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No messages found for this bag" });
+    }
+
+    res.json(result.rows); // return all messages in order
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch messages" });
+  }
 });

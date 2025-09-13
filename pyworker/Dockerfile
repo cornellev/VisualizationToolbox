@@ -4,17 +4,18 @@ FROM ros:humble
 RUN apt-get update && apt-get install -y python3-pip python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN pip3 install --no-cache-dir --upgrade pip
-
-# Install FastAPI + Uvicorn
-RUN pip3 install --no-cache-dir fastapi uvicorn[standard]
-
-# Set up workspace dir
+# Set working directory
 WORKDIR /app
 
-# Copy code
-COPY . /app
+# Copy requirements.txt first to leverage Docker cache
+COPY requirements.txt .
+
+# Upgrade pip and install all Python dependencies
+RUN pip3 install --no-cache-dir --upgrade pip
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy rest of the code
+COPY . .
 
 # Default command
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -26,22 +26,18 @@ function App() {
     setBag(selectedOption.label.replace(".json.gz", "")); // set bag name without extension
   };
 
-  // Fetch the list of available .gz files from GitHub
   const fetchBagList = async () => {
-    const url =
-      "https://api.github.com/repos/AjayParthibha/ReplayDashData/contents/data"; // change path if needed
     try {
-      const response = await fetch(url);
-      const files = await response.json();
+      const response = await fetch("http://localhost:5000/api/rosbags"); // adjust your backend URL
+      const data = await response.json();
 
-      const gzFiles = files
-        .filter((file) => file.name.endsWith(".json.gz"))
-        .map((file) => ({
-          label: file.name,
-          value: file.download_url, // directly store download URL
-        }));
+      // data is expected to be an array of objects: [{ folder_name: "rosbag1" }, ...]
+      const options = data.map((bag) => ({
+        label: bag.folder_name,
+        value: bag.folder_name,
+      }));
 
-      setBagList(gzFiles);
+      setBagList(options);
     } catch (error) {
       console.error("Failed to fetch bag list:", error);
     }
@@ -54,20 +50,16 @@ function App() {
     }
 
     setIsLoading(true);
-    const url = `https://raw.githubusercontent.com/AjayParthibha/ReplayDashData/main/data/${bag}.json.gz`;
 
     try {
-      const response = await fetch(url);
-      const compressedData = await response.arrayBuffer();
+      const response = await fetch(
+        `http://localhost:5000/api/rosbags/${bag}` // endpoint returns JSON for folder_name
+      );
+      const data = await response.json();
 
-      const decompressed = pako.inflate(new Uint8Array(compressedData), {
-        to: "string",
-      });
-      const data = JSON.parse(decompressed);
-
-      setJSONList(data);
+      setJSONList(data.rosbag_json || data); // depending on how your backend returns the JSON
     } catch (error) {
-      console.error("Error fetching and decompressing:", error);
+      console.error("Error fetching bag data:", error);
     } finally {
       setIsLoading(false);
     }
