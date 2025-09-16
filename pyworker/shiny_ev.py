@@ -25,6 +25,12 @@ app_ui = ui.page_sidebar(
         ui.output_ui("x_select"),
         ui.output_ui("y_select"),
         ui.hr(),
+        ui.h4("Axis ranges"),
+        ui.input_numeric("xmin", "X min", value=None),
+        ui.input_numeric("xmax", "X max", value=None),
+        ui.input_numeric("ymin", "Y min", value=None),
+        ui.input_numeric("ymax", "Y max", value=None),
+        ui.hr(),
         ui.h4("Plot options"),
         ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
         open="open",
@@ -162,10 +168,16 @@ def server(input, output, session):
             fig = px.scatter(out, x="x", y="y")
         else:
             fig = px.line(out, x="x", y="y")
+        
+        xmin, xmax = input.xmin(), input.xmax()
+        ymin, ymax = input.ymin(), input.ymax()
+
         fig.update_layout(
             margin=dict(l=40, r=20, t=40, b=40),
             xaxis_title=xlab,
             yaxis_title=ylab,
+            xaxis=dict(range=[xmin, xmax] if xmin is not None and xmax is not None else None),
+            yaxis=dict(range=[ymin, ymax] if ymin is not None and ymax is not None else None),
         )
 
         html = fig.to_html(include_plotlyjs="cdn", full_html=False)
