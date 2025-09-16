@@ -24,6 +24,9 @@ app_ui = ui.page_sidebar(
         ui.h4("Select axes"),
         ui.output_ui("x_select"),
         ui.output_ui("y_select"),
+        ui.hr(),
+        ui.h4("Plot options"),
+        ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
         open="open",
     ),
     ui.layout_column_wrap(
@@ -49,8 +52,26 @@ def server(input, output, session):
         d = df()
         if d is None or d.empty:
             return ui.p("Upload a CSV/JSON to begin.")
-        return ui.HTML(d.head(12).to_html(index=False))
 
+        # Show first 20 rows, all columns
+        styled_html = (
+            d.head(20)
+            .to_html(
+                index=False,
+                border=1,
+                justify="center",
+                classes="table table-striped table-bordered table-sm"
+            )
+        )
+
+    # Wrap in a scrollable div so wide tables don’t break layout
+        return ui.HTML(
+            f"""
+            <div style="max-height:400px; overflow:auto; white-space:nowrap;">
+                {styled_html}
+            </div>
+            """
+        )
     def numeric_like_columns(_df: pd.DataFrame) -> list[str]:
         cols: list[str] = []
         for c in _df.columns:
@@ -136,7 +157,11 @@ def server(input, output, session):
 
         out = pd.DataFrame({"x": x, "y": y}).dropna(subset=["x", "y"])  # Always drop NAs
 
-        fig = px.line(out, x="x", y="y")
+        plot_type = input.plot_type()
+        if plot_type == "scatter":
+            fig = px.scatter(out, x="x", y="y")
+        else:
+            fig = px.line(out, x="x", y="y")
         fig.update_layout(
             margin=dict(l=40, r=20, t=40, b=40),
             xaxis_title=xlab,
