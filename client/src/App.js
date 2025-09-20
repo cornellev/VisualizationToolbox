@@ -7,7 +7,7 @@ import pako from "pako";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
 const PYWORKER_BASE = (process.env.PYWORKER_URL || "").replace(/\/$/, "");
-const EV_URL = process.env.PYWORKER_BASE + "/ev";
+const EV_URL = PYWORKER_BASE + "/ev";
 
 function DataViewer() {
   const [bag, setBag] = useState(null);
