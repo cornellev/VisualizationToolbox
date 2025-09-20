@@ -16,10 +16,14 @@ def zero_to_start(s: pd.Series) -> pd.Series:
         return s
     return s - s.loc[idx]
 
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.h2("Run Data Analysis"),
         ui.input_file("csv", "Upload a File", accept=[".csv"], multiple=False),
+        ui.hr(),
+        ui.h4("Plot options"),
+        ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
         ui.hr(),
         ui.h4("Select axes"),
         ui.output_ui("x_select"),
@@ -30,14 +34,11 @@ app_ui = ui.page_sidebar(
         ui.input_numeric("xmax", "X max", value=None),
         ui.input_numeric("ymin", "Y min", value=None),
         ui.input_numeric("ymax", "Y max", value=None),
-        ui.hr(),
-        ui.h4("Plot options"),
-        ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
         open="open",
     ),
     ui.layout_column_wrap(
         ui.card(ui.card_header("Preview"), ui.output_ui("preview")),
-        ui.card(ui.card_header("Reactive plot"), ui.output_ui("plot")),  # <- plain UI output
+        ui.output_ui("plot_card"),  
         width=1 / 1,
     ),
 )
@@ -100,6 +101,17 @@ def server(input, output, session):
         return cols
 
     @render.ui
+    def plot_card():
+        plot_type = input.plot_type()
+        title = "Line Plot" if plot_type == "line" else "Scatter Plot"
+        return ui.card(
+            ui.card_header(title),
+            ui.card_body(
+                ui.output_ui("plot")
+            )
+        )
+
+    @render.ui
     def x_select():
         d = df()
         if d is None or d.empty:
@@ -109,34 +121,47 @@ def server(input, output, session):
         default = next((c for c in preferred if c in num_cols), (num_cols[0] if num_cols else None))
         return ui.input_select("xcol", "X Axis", choices=num_cols, selected=default)
 
+    
     @render.ui
     def y_select():
         d = df()
         if d is None or d.empty:
-            return ui.input_select("ycol", "Y Axis", choices=[])
+            return ui.input_selectize("ycols", "Y Axis (multiple)", choices=[], multiple=True)
+
         num_cols = numeric_like_columns(d)
         preferred = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
-        default = next((c for c in preferred if c in num_cols), (num_cols[1] if len(num_cols) > 1 else (num_cols[0] if num_cols else None)))
-        return ui.input_select("ycol", "Y Axis", choices=num_cols, selected=default)
 
+        # pick all preferred cols that exist, or just the first numeric col
+        defaults = [c for c in preferred if c in num_cols]
+        if not defaults and num_cols:
+            defaults = [num_cols[0]]
+
+        return ui.input_selectize(
+            "ycols",
+            "Y Axis (multiple)",
+            choices=num_cols,
+            selected=defaults,
+            multiple=True
+        )
+    
     @render.ui
     def plot():
         d = df()
         if d is None or d.empty:
             return ui.HTML("Upload a CSV/JSON to begin.")
 
-        # Determine X/Y columns from inputs or sensible defaults
-        def pick_defaults(cols: list[str]) -> tuple[str | None, str | None]:
+        # Determine defaults
+        def pick_defaults(cols: list[str]) -> tuple[str | None, list[str]]:
             if not cols:
-                return None, None
+                return None, []
             pref_x = ["lap_obc_timestamp", "timestamp", "time", "dist", "distance"]
             x_def = next((c for c in pref_x if c in cols), cols[0])
             pref_y = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
-            y_def = next((c for c in pref_y if c in cols and c != x_def), None)
-            if y_def is None:
+            y_defs = [c for c in pref_y if c in cols and c != x_def]
+            if not y_defs:
                 rem = [c for c in cols if c != x_def]
-                y_def = rem[0] if rem else x_def
-            return x_def, y_def
+                y_defs = rem[:1] if rem else []
+            return x_def, y_defs
 
         num_cols = numeric_like_columns(d)
         try:
@@ -144,43 +169,51 @@ def server(input, output, session):
         except Exception:
             xcol = None
         try:
-            ycol = input.ycol()
+            ycols = input.ycols() or []
         except Exception:
-            ycol = None
-        def_x, def_y = pick_defaults(num_cols)
+            ycols = []
+
+        def_x, def_ycols = pick_defaults(num_cols)
         xcol = xcol if xcol in d.columns else def_x
-        ycol = ycol if ycol in d.columns else def_y
-        if xcol is None or ycol is None:
+        if not ycols:
+            ycols = def_ycols
+
+        if xcol is None or not ycols:
             return ui.HTML("No suitable numeric columns to plot.")
 
+        # Prepare X
         x = to_numeric(d[xcol])
-        y = to_numeric(d[ycol])
-        x_name = xcol.lower()
-        if ("time" in x_name or "timestamp" in x_name or "dist" in x_name or "distance" in x_name):
+        if any(k in xcol.lower() for k in ["time", "timestamp", "dist", "distance"]):
             x = zero_to_start(x)
-        xlab = f"{xcol}"
-        ylab = f"{ycol}"
 
-        out = pd.DataFrame({"x": x, "y": y}).dropna(subset=["x", "y"])  # Always drop NAs
+        out = pd.DataFrame({"x": x})
+        for yc in ycols:
+            out[yc] = to_numeric(d[yc])
 
+        # Reshape to long format for Plotly
+        out_long = out.melt(id_vars=["x"], value_vars=ycols,
+                            var_name="Series", value_name="y").dropna()
+
+        # Plot
         plot_type = input.plot_type()
         if plot_type == "scatter":
-            fig = px.scatter(out, x="x", y="y")
+            fig = px.scatter(out_long, x="x", y="y", color="Series")
         else:
-            fig = px.line(out, x="x", y="y")
-        
+            fig = px.line(out_long, x="x", y="y", color="Series")
+
         xmin, xmax = input.xmin(), input.xmax()
         ymin, ymax = input.ymin(), input.ymax()
 
         fig.update_layout(
+            legend_title_text="", 
             margin=dict(l=40, r=20, t=40, b=40),
-            xaxis_title=xlab,
-            yaxis_title=ylab,
+            xaxis_title=xcol,
+            yaxis_title="Values",
             xaxis=dict(range=[xmin, xmax] if xmin is not None and xmax is not None else None),
             yaxis=dict(range=[ymin, ymax] if ymin is not None and ymax is not None else None),
         )
 
-        html = fig.to_html(include_plotlyjs="cdn", full_html=False)
-        return ui.HTML(html)
+        return ui.HTML(fig.to_html(include_plotlyjs="cdn", full_html=False))
+
 
 app = App(app_ui, server)

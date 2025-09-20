@@ -4,7 +4,7 @@ const EV_URL = `http://localhost:8000/ev/`;
 
 export default function StaticTab() {
   return (
-    <div style={{ height: "70vh", width: "100%" }}>
+    <div style={{ height: "calc(100vh - 50px)", width: "100%" }}>
       <iframe
         title="Run Data Analysis"
         src={EV_URL}
@@ -12,8 +12,6 @@ export default function StaticTab() {
           width: "100%",
           height: "100%",
           border: "none",
-          borderRadius: 8,
-          boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
           background: "#fff",
         }}
       />
