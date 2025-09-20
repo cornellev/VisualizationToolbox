@@ -6,7 +6,7 @@ import PointCloudPlayer from "./PointCloudPlayer";
 import pako from "pako";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = `http://localhost:8000/ev/`;
+const EV_URL = `http://` + process.env.HOST + `:8000/ev/`;
 
 function DataViewer() {
   const [bag, setBag] = useState(null);
