@@ -79,6 +79,16 @@ export default function PointCloudPlayer({ jsonFrames }) {
     const colors = [];
 
     const frame = jsonFrames[currentFrame];
+    if (!frame) {
+      console.warn("Frame is undefined at index", currentFrame);
+      return;
+    }
+
+    if (!Array.isArray(frame.points)) {
+      console.warn("frame.points is not an array:", frame.points);
+      return;
+    }
+
     frame.points.forEach((pt) => {
       positions.push(pt.x, pt.y, pt.z);
       colors.push(pt.r / 255, pt.g / 255, pt.b / 255);
