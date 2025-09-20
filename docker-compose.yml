@@ -9,6 +9,7 @@ services:
       - server
     environment:
       - REACT_APP_API_URL=http://${HOST}:${SERVER_PORT:-5000}
+      - HOST=${HOST}
 
   server:
     build:
@@ -24,6 +25,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
       - DB_PORT=${DB_PORT}
+      - HOST=${HOST}
       - PYWORKER_URL=http://pyworker:8000
     volumes:
       - uploads-folder:/app/uploads-folder
