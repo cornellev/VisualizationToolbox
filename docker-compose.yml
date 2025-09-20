@@ -17,7 +17,6 @@ services:
     ports:
       - "${SERVER_PORT:-5000}:5000"
     depends_on:
-      - db
       - pyworker
     environment:
       - DB_HOST=${DB_HOST}
@@ -45,20 +44,6 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
       - DB_PORT=${DB_PORT}
-    depends_on:
-      - db
-
-  db:
-    image: postgres:15
-    restart: always
-    environment:
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=${DB_NAME}
-    ports:
-      - "5432:5432"
-    volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
 volumes:
   pgdata:
