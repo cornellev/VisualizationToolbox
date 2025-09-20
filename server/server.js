@@ -67,7 +67,7 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
 });
 
 app.listen(5000, () =>
-  console.log("Server running on http://" + process.env.HOST + ":5000")
+  console.log("Server running on http://" + process.env.SERVER_URL + ":5000")
 );
 
 process.on("uncaughtException", (err) =>
