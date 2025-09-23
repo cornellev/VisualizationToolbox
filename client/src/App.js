@@ -91,7 +91,7 @@ function DataViewer() {
         <UploadBag onUploadComplete={handleList} loading={handleLoad} />
 
         <Select
-          options={bagList}
+          options={bagList || []}
           onChange={handleBagSelect}
           isDisabled={isLoading}
           placeholder="Select a ROSBag to visualize"
