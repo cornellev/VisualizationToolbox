@@ -153,7 +153,7 @@
   display: inline-flex;
   align-items: stretch;
   gap: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .tab {
@@ -171,16 +171,16 @@
 }
 
 .tab.active {
-  background: #1f2937;            
+  background: #1f2937;
   color: #fff;
-  border-color: rgba(255,255,255,0.18);
+  border-color: rgba(255, 255, 255, 0.18);
   opacity: 1;
 }
 
 .panel {
   background: #fff;
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -208,7 +208,7 @@
 }
 .right-pane {
   width: 60%;
-  max-width: none; 
+  max-width: none;
 }
 
 .static-container {
