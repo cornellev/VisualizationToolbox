@@ -13,7 +13,7 @@ from datetime import datetime
 import time
 from sensor_msgs.msg import PointField
 import array
-import pandas as pd
+from utils.parser import parse_message
 
 
 DB_HOST = os.getenv("DB_HOST", "db")
@@ -52,31 +52,36 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def msg_to_dict(msg):
+def try_parse_number(s):
+    try:
+        if "." in s or "e" in s.lower():
+            return float(s)
+        return int(s)
+    except ValueError:
+        return s
+
+def parse_csv_string(s, headers=None):
+    parts = [try_parse_number(x) for x in s.split(",")]
+    if headers and len(headers) == len(parts):
+        return dict(zip(headers, parts))
+    return {f"col{i+1}": val for i, val in enumerate(parts)}
+
+def msg_to_dict(msg, headers=None):
     if hasattr(msg, "__slots__"):
         return {slot: msg_to_dict(getattr(msg, slot)) for slot in msg.__slots__}
     elif isinstance(msg, (list, tuple)):
         return [msg_to_dict(v) for v in msg]
     elif isinstance(msg, dict):
-        return {k: msg_to_dict(v) for k, v in msg.items()}
+        out = {}
+        for k, v in msg.items():
+            if isinstance(v, str) and "," in v:  # looks like CSV string
+                out.update(parse_csv_string(v, headers))
+            else:
+                out[k] = msg_to_dict(v)
+        return out
     else:
         return msg
 
-
-def ensure_electrical_state_table(cur):
-    """Create table for parsed ElectricalState if not exists"""
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS electrical_state (
-            id SERIAL PRIMARY KEY,
-            bag_name TEXT,
-            timestamp BIGINT,
-            frame_id TEXT,
-            bus_voltage DOUBLE PRECISION,
-            shunt_voltage DOUBLE PRECISION,
-            current DOUBLE PRECISION,
-            power DOUBLE PRECISION
-        )
-    """)
 
 
 def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
@@ -105,10 +110,7 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
         topic_types[topic_metadata.name] = (topic_metadata.type, get_message(topic_metadata.type))
 
     batch = []
-    electrical_rows = []
     total_msgs = 0
-
-    ensure_electrical_state_table(cur)
 
     while reader.has_next():
         topic, data, t = reader.read_next()
@@ -121,31 +123,12 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
         # Always store in rosbag_messages
         batch.append((bag_name, topic, t, msg_json))
 
-        # Special handling for ElectricalState
-        if topic_type == "i2c_com/msg/ElectricalState":
-            electrical_rows.append((
-                bag_name,
-                t,  # just use the raw timestamp from the bag
-                msg.header.frame_id,
-                msg.bus_voltage,
-                msg.shunt_voltage,
-                msg.current,
-                msg.power,
-            ))
-
         if len(batch) >= batch_size:
             execute_batch(
                 cur,
                 "INSERT INTO rosbag_messages (bag_name, topic, timestamp, data) VALUES (%s, %s, %s, %s)",
                 batch,
             )
-            if electrical_rows:
-                execute_batch(
-                    cur,
-                    "INSERT INTO electrical_state (bag_name, timestamp, frame_id, bus_voltage, shunt_voltage, current, power) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                    electrical_rows,
-                )
-                electrical_rows.clear()
             conn.commit()
             total_msgs += len(batch)
             print(f"Inserted {total_msgs} messages...")
@@ -157,14 +140,9 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
             "INSERT INTO rosbag_messages (bag_name, topic, timestamp, data) VALUES (%s, %s, %s, %s)",
             batch,
         )
-    if electrical_rows:
-        execute_batch(
-            cur,
-            "INSERT INTO electrical_state (bag_name, timestamp, frame_id, bus_voltage, shunt_voltage, current, power) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            electrical_rows,
-        )
-    conn.commit()
-    total_msgs += len(batch)
+        conn.commit()
+        total_msgs += len(batch)
+
     cur.close()
 
 
