@@ -13,6 +13,7 @@ from datetime import datetime
 import time
 from sensor_msgs.msg import PointField
 import array
+from utils.parser import parse_message
 
 
 DB_HOST = os.getenv("DB_HOST", "db")
@@ -47,23 +48,43 @@ class NumpyEncoder(json.JSONEncoder):
         if isinstance(obj, array.array):
             return list(obj)
         if isinstance(obj, PointField):
-            return str(obj)  # or convert to dict manually
+            return str(obj)
         return super().default(obj)
 
 
-def msg_to_dict(msg):
+def try_parse_number(s):
+    try:
+        if "." in s or "e" in s.lower():
+            return float(s)
+        return int(s)
+    except ValueError:
+        return s
+
+def parse_csv_string(s, headers=None):
+    parts = [try_parse_number(x) for x in s.split(",")]
+    if headers and len(headers) == len(parts):
+        return dict(zip(headers, parts))
+    return {f"col{i+1}": val for i, val in enumerate(parts)}
+
+def msg_to_dict(msg, headers=None):
     if hasattr(msg, "__slots__"):
         return {slot: msg_to_dict(getattr(msg, slot)) for slot in msg.__slots__}
     elif isinstance(msg, (list, tuple)):
         return [msg_to_dict(v) for v in msg]
     elif isinstance(msg, dict):
-        return {k: msg_to_dict(v) for k, v in msg.items()}
+        out = {}
+        for k, v in msg.items():
+            if isinstance(v, str) and "," in v:  # looks like CSV string
+                out.update(parse_csv_string(v, headers))
+            else:
+                out[k] = msg_to_dict(v)
+        return out
     else:
         return msg
 
 
+
 def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
-    # Insert metadata into rosbags table
     cur = conn.cursor()
     yaml_data = None
     if yaml_path and os.path.exists(yaml_path):
@@ -74,8 +95,9 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
         (bag_name, json.dumps(yaml_data) if yaml_data else None, datetime.utcnow())
     )
     conn.commit()
-    
-    # Now process messages into rosbag_messages
+
+    rclpy.init(args=None)
+
     reader = rosbag2_py.SequentialReader()
     storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id="sqlite3")
     converter_options = rosbag2_py.ConverterOptions(
@@ -85,17 +107,20 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
 
     topic_types = {}
     for topic_metadata in reader.get_all_topics_and_types():
-        topic_types[topic_metadata.name] = get_message(topic_metadata.type)
+        topic_types[topic_metadata.name] = (topic_metadata.type, get_message(topic_metadata.type))
 
     batch = []
     total_msgs = 0
 
     while reader.has_next():
         topic, data, t = reader.read_next()
-        msg_type = topic_types[topic]
+        print(f"Got message on {topic} at {t}")
+        topic_type, msg_type = topic_types[topic]
         msg = deserialize_message(data, msg_type)
         msg_dict = msg_to_dict(msg)
         msg_json = json.dumps(msg_dict, cls=NumpyEncoder)
+
+        # Always store in rosbag_messages
         batch.append((bag_name, topic, t, msg_json))
 
         if len(batch) >= batch_size:
@@ -118,7 +143,6 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
         conn.commit()
         total_msgs += len(batch)
 
-    print(f"Finished inserting {total_msgs} messages from {bag_name}")
     cur.close()
 
 

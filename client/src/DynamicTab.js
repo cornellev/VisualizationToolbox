@@ -10,6 +10,7 @@ export default function DynamicTab() {
   const [bagList, setBagList] = useState(null);
   const [selected, setSelected] = useState(null);
   const [JSONList, setJSONList] = useState(null);
+  const [content, setContent] = useState("nothing here");
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -55,6 +56,16 @@ export default function DynamicTab() {
   useEffect(() => {
     fetchBagList();
   }, []);
+
+  useEffect(() => {
+    if (!JSONList || JSONList.length === 0) return;
+    let i = 0;
+    const id = setInterval(() => {
+      setContent(JSON.stringify(JSONList[i], null, 2));
+      i = (i + 1) % JSONList.length;
+    }, 100);
+    return () => clearInterval(id);
+  }, [JSONList]);
 
   const tools = [
     { value: "pointcloud", label: "Point Cloud" },
