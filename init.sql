@@ -15,3 +15,11 @@ CREATE TABLE rosbags (
     yaml_data JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE csv_uploads (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,   
+    headers TEXT[] NOT NULL,
+    data JSONB NOT NULL,      
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

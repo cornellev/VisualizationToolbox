@@ -66,6 +66,65 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
   }
 });
 
+const csv = require("csv-parser");
+
+app.post("/upload-csv", upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).send("No CSV file uploaded");
+
+  if (!req.file.originalname.toLowerCase().endsWith(".csv")) {
+    return res.status(400).send("Uploaded file must be a .csv");
+  }
+
+  const filePath = req.file.path;
+  const rows = [];
+
+  try {
+    // Parse the CSV into an array of objects
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on("data", (row) => rows.push(row))
+        .on("end", resolve)
+        .on("error", reject);
+    });
+
+    if (rows.length === 0) {
+      await fs.promises.unlink(filePath).catch(() => {});
+      return res.status(400).send("CSV file is empty or invalid");
+    }
+
+    const headers = Object.keys(rows[0]);
+    const name = path.parse(req.file.originalname).name;
+
+    console.log(`Parsed CSV: ${name} (${rows.length} rows)`);
+
+    await pool.query(
+      `
+      INSERT INTO csv_uploads (name, headers, data)
+      VALUES ($1, $2, $3::jsonb)
+      ON CONFLICT (name) DO UPDATE
+      SET headers = EXCLUDED.headers,
+          data = EXCLUDED.data,
+          uploaded_at = NOW()
+      `,
+      [name, headers, JSON.stringify(rows)]
+    );
+
+    await fs.promises.unlink(filePath).catch(() => {});
+
+    return res.json({
+      message: "CSV uploaded successfully",
+      name,
+      headers,
+      rows: rows.length,
+    });
+  } catch (err) {
+    console.error("CSV upload failed:", err);
+    await fs.promises.unlink(filePath).catch(() => {});
+    return res.status(500).json({ error: "Failed to process CSV" });
+  }
+});
+
 app.listen(5000, () => console.log("Server running on http://localhost:5000"));
 
 process.on("uncaughtException", (err) =>
@@ -109,5 +168,35 @@ app.get("/api/rosbags/:folderName", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch messages" });
+  }
+});
+
+// GET /api/csv
+app.get("/api/csv", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, uploaded_at FROM csv_uploads ORDER BY uploaded_at DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching CSV list:", err);
+    res.status(500).json({ error: "Failed to fetch CSV list" });
+  }
+});
+
+// GET /api/csv/:name
+app.get("/api/csv/:name", async (req, res) => {
+  const { name } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT headers, data FROM csv_uploads WHERE name = $1",
+      [name]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "No CSV found" });
+    res.json(result.rows[0]); // { headers, data }
+  } catch (err) {
+    console.error("Error fetching CSV:", err);
+    res.status(500).json({ error: "Failed to fetch CSV" });
   }
 });
