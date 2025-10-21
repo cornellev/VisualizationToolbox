@@ -34,10 +34,12 @@ Python, Node.js, Express.js, PostgreSQL
 ### Backend
 Python (PyWorker):
 - Parses CSV and ROSBag data.
-- Handles database uploads and data formatting.
+- Handles database uploads and data formatting
+  
 Node.js + Express.js:
 - Manages routing and server endpoints.
-- Interfaces with PostgreSQL for data retrieval.
+- Interfaces with PostgreSQL for data retrieval
+  
 PostgreSQL:
 - Stores parsed CSV and ROSBag data 
 ### Usage
