@@ -5,3 +5,4 @@ pandas
 plotly
 shiny>=1.0.0
 python-dateutil
+requests

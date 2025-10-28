@@ -4,6 +4,10 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from math import isinf
+import requests 
+import urllib.parse
+
+API_BASE = "http://server:5000/api" 
 
 CLICK_JS = """
 (function () {
@@ -67,6 +71,7 @@ CLICK_JS = """
 })();
 """
 
+
 def to_numeric(s: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(s):
         return s
@@ -83,8 +88,6 @@ def zero_to_start(s: pd.Series) -> pd.Series:
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.h2("Run Data Analysis"),
-        ui.input_file("csv", "Upload a File", accept=[".csv"], multiple=False),
-        ui.hr(),
         ui.h4("Plot options"),
         ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
         ui.hr(),
@@ -120,39 +123,52 @@ app_ui = ui.page_sidebar(
 )
 
 def server(input, output, session):
-    @reactive.Calc
-    def df() -> pd.DataFrame | None:
-        f = input.csv()
-        if not f:
-            return None
-        path = str(f[0]["datapath"])
-        d = pd.read_csv(path)
-        d.columns = [c.strip().lower() for c in d.columns]
-        return d
+    dataframe = reactive.Value(None)
+
+    # Fetch data from Express API at startup
+    @reactive.effect
+    def _fetch_csv():
+        try:
+            query = session.request.query_string
+            params = urllib.parse.parse_qs(query)
+            csv_name = params.get("csv", [None])[0]
+
+            if not csv_name:
+                print("[INFO] No ?csv parameter provided in URL.")
+                return
+
+            print(f"[INFO] Fetching CSV '{csv_name}' from API...")
+            res = requests.get(f"{API_BASE}/csv/{csv_name}", timeout=10)
+            res.raise_for_status()
+            payload = res.json()
+
+            data = payload.get("data", [])
+            if not data:
+                print("[WARN] CSV data is empty.")
+                return
+
+            df = pd.DataFrame(data)
+            df.columns = [c.strip().lower() for c in df.columns]
+            dataframe.set(df)
+            print(f"[INFO] Loaded CSV '{csv_name}' ({len(df)} rows).")
+        except Exception as e:
+            print("[ERROR] Failed to fetch CSV:", e)
+
+    @reactive.calc
+    def df():
+        return dataframe.get()
+
 
     @render.ui
     def preview():
         d = df()
         if d is None or d.empty:
-            return ui.p("Upload a CSV/JSON to begin.")
-
-        styled_html = (
-            d.head(20)
-            .to_html(
-                index=False,
-                border=1,
-                justify="center",
-                classes="table table-striped table-bordered table-sm"
-            )
+            return ui.p("Waiting for CSV data...")
+        styled_html = d.head(20).to_html(
+            index=False, border=1, justify="center",
+            classes="table table-striped table-bordered table-sm"
         )
-
-        return ui.HTML(
-            f"""
-            <div style="max-height:400px; overflow:auto; white-space:nowrap;">
-                {styled_html}
-            </div>
-            """
-        )
+        return ui.HTML(f"<div style='max-height:400px;overflow:auto'>{styled_html}</div>")
 
     selected_points = reactive.Value([])
 
@@ -275,68 +291,36 @@ def server(input, output, session):
     def plot():
         d = df()
         if d is None or d.empty:
-            return ui.HTML("Upload a CSV/JSON to begin.")
-
-        # Determine defaults
-        def pick_defaults(cols: list[str]) -> tuple[str | None, list[str]]:
-            if not cols:
-                return None, []
-            pref_x = ["lap_obc_timestamp", "timestamp", "time", "dist", "distance"]
-            x_def = next((c for c in pref_x if c in cols), cols[0])
-            pref_y = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
-            y_defs = [c for c in pref_y if c in cols and c != x_def]
-            if not y_defs:
-                rem = [c for c in cols if c != x_def]
-                y_defs = rem[:1] if rem else []
-            return x_def, y_defs
+            return ui.HTML("Waiting for CSV data...")
 
         num_cols = numeric_like_columns(d)
-        try:
-            xcol = input.xcol()
-        except Exception:
-            xcol = None
-        try:
-            ycols = input.ycols() or []
-        except Exception:
-            ycols = []
+        if not num_cols:
+            return ui.HTML("No numeric columns found in CSV.")
+        xcol = input.xcol() or num_cols[0]
+        ycols = input.ycols() or num_cols[1:2]
 
-        def_x, def_ycols = pick_defaults(num_cols)
-        xcol = xcol if xcol in d.columns else def_x
-        if not ycols:
-            ycols = def_ycols
-
-        if xcol is None or not ycols:
-            return ui.HTML("No suitable numeric columns to plot.")
         x = to_numeric(d[xcol])
         if any(k in xcol.lower() for k in ["time", "timestamp", "dist", "distance"]):
             x = zero_to_start(x)
+
         out = pd.DataFrame({"x": x})
         for yc in ycols:
             out[yc] = to_numeric(d[yc])
 
-        # Reshape to long format for Plotly
         out_long = out.melt(id_vars=["x"], value_vars=ycols,
                             var_name="Series", value_name="y").dropna()
 
-        # Plot
-        plot_type = input.plot_type()
-        if plot_type == "scatter":
-            fig = px.scatter(out_long, x="x", y="y", color="Series")
-        else:
-            fig = px.line(out_long, x="x", y="y", color="Series")
-
-        xmin, xmax = input.xmin(), input.xmax()
-        ymin, ymax = input.ymin(), input.ymax()
+        fig = px.line(out_long, x="x", y="y", color="Series") \
+            if input.plot_type() == "line" \
+            else px.scatter(out_long, x="x", y="y", color="Series")
 
         fig.update_layout(
             legend_title_text="",
             margin=dict(l=40, r=20, t=40, b=40),
             xaxis_title=xcol,
-            yaxis_title="Values",
-            xaxis=dict(range=[xmin, xmax] if xmin is not None and xmax is not None else None),
-            yaxis=dict(range=[ymin, ymax] if ymin is not None and ymax is not None else None),
+            yaxis_title="Values"
         )
-        html = fig.to_html(include_plotlyjs=False, full_html=False)
-        return ui.HTML(f'<div id="plot_container">{html}</div>')
 
+        html = fig.to_html(include_plotlyjs=False, full_html=False)
+        return ui.HTML(f"<div id='plot_container'>{html}</div>")
 app = App(app_ui, server)

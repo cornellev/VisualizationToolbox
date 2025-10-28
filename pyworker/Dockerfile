@@ -18,6 +18,11 @@ RUN mkdir -p src
 # Assuming your local repo has `src/` at its root
 COPY src/ src/
 
+# Build pigpio from source
+RUN git clone https://github.com/joan2937/pigpio.git /tmp/pigpio && \
+    cd /tmp/pigpio && make && make install && ldconfig && rm -rf /tmp/pigpio
+
+
 # Build the workspace
 RUN . /opt/ros/humble/setup.sh && colcon build --symlink-install
 

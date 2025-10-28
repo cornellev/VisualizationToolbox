@@ -104,16 +104,14 @@ export default function StaticTab() {
         />
 
         <button
-          onClick={() =>
-            selectedCsv &&
-            window.open(
-              `${EV_URL}?csv=${encodeURIComponent(selectedCsv.value)}`,
-              "_blank"
-            )
-          }
+          onClick={async () => {
+            if (!selectedCsv) return;
+            await fetch(`${API_BASE}/api/csv/${selectedCsv.value}`, {
+              method: "GET",
+            });
+          }}
           className="button-css"
           disabled={!selectedCsv || isLoading}
-          style={{ marginBottom: "25px" }}
         >
           Fetch & Visualize CSV
         </button>
