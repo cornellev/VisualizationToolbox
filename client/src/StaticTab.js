@@ -104,11 +104,16 @@ export default function StaticTab() {
         />
 
         <button
-          onClick={async () => {
+          onClick={() => {
             if (!selectedCsv) return;
-            await fetch(`${API_BASE}/api/csv/${selectedCsv.value}`, {
-              method: "GET",
-            });
+            // Just update iframe source; Shiny will auto-load the CSV
+            const newSrc = `${EV_URL}?csv=${encodeURIComponent(
+              selectedCsv.value
+            )}`;
+            const iframe = document.querySelector(
+              "iframe[title='Run Data Analysis']"
+            );
+            if (iframe) iframe.src = newSrc;
           }}
           className="button-css"
           disabled={!selectedCsv || isLoading}

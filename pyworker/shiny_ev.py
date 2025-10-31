@@ -4,11 +4,30 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from math import isinf
+import os
+
 import requests 
-import urllib.parse
+from urllib.parse import urlparse, parse_qs
 
-API_BASE = "http://server:5000/api" 
+API_BASE = os.getenv("API_BASE", "http://server:5000")  # inside Docker network
 
+def fetch_csv_from_backend(csv_name: str) -> pd.DataFrame | None:
+    try:
+        url = f"{API_BASE}/api/csv/{csv_name}"
+        print(f"[INFO] Fetching CSV from {url}")
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        js = resp.json()
+        headers = js.get("headers", [])
+        rows = js.get("data", [])
+        if not headers or not rows:
+            print("[WARN] Empty CSV data received")
+            return None
+        return pd.DataFrame(rows)
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch CSV: {e}")
+        return None
+    
 CLICK_JS = """
 (function () {
   let buffer = []; // keep last two clicked points
@@ -123,40 +142,47 @@ app_ui = ui.page_sidebar(
 )
 
 def server(input, output, session):
-    dataframe = reactive.Value(None)
+    # Parse ?csv=<name> from URL when app loads
+    query = session.input
+    csv_name = reactive.Value(None)
 
-    # Fetch data from Express API at startup
+    
     @reactive.effect
-    def _fetch_csv():
+    def _on_start():
         try:
-            query = session.request.query_string
-            params = urllib.parse.parse_qs(query)
-            csv_name = params.get("csv", [None])[0]
-
-            if not csv_name:
-                print("[INFO] No ?csv parameter provided in URL.")
-                return
-
-            print(f"[INFO] Fetching CSV '{csv_name}' from API...")
-            res = requests.get(f"{API_BASE}/csv/{csv_name}", timeout=10)
-            res.raise_for_status()
-            payload = res.json()
-
-            data = payload.get("data", [])
-            if not data:
-                print("[WARN] CSV data is empty.")
-                return
-
-            df = pd.DataFrame(data)
-            df.columns = [c.strip().lower() for c in df.columns]
-            dataframe.set(df)
-            print(f"[INFO] Loaded CSV '{csv_name}' ({len(df)} rows).")
+            # Try pulling from ASGI scope (always available)
+            scope = getattr(session, "http_conn", None)
+            if scope and hasattr(scope, "scope"):
+                raw_path = scope.scope.get("path", "")
+                raw_qs = scope.scope.get("query_string", b"").decode()
+                if raw_qs:
+                    params = parse_qs(raw_qs)
+                    if "csv" in params:
+                        csv_name.set(params["csv"][0])
+                        print(f"[INFO] Selected CSV = {params['csv'][0]}")
+                    else:
+                        print(f"[INFO] Query string present but no ?csv param: {raw_qs}")
+                else:
+                    print(f"[INFO] No query string for path {raw_path}")
+            else:
+                print("[WARN] session.http_conn.scope not available yet")
         except Exception as e:
-            print("[ERROR] Failed to fetch CSV:", e)
+            print(f"[ERROR] Could not read query string: {e}")
 
-    @reactive.calc
-    def df():
-        return dataframe.get()
+
+    @reactive.Calc
+    def df() -> pd.DataFrame | None:
+        name = csv_name.get()
+        if not name:
+            return None
+        d = fetch_csv_from_backend(name)
+        if d is None or d.empty:
+            print(f"[WARN] No data for {name}")
+            return None
+        # Normalize headers
+        d.columns = [c.strip().lower() for c in d.columns]
+        return d
+
 
 
     @render.ui
@@ -260,32 +286,21 @@ def server(input, output, session):
         d = df()
         if d is None or d.empty:
             return ui.input_select("xcol", "X Axis", choices=[])
-        num_cols = numeric_like_columns(d)
-        preferred = ["lap_obc_timestamp", "timestamp", "time", "dist", "distance"]
-        default = next((c for c in preferred if c in num_cols), (num_cols[0] if num_cols else None))
+        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(d[c])]
+        preferred = ["timestamp", "time", "dist", "distance"]
+        default = next((c for c in preferred if c in num_cols), num_cols[0] if num_cols else None)
         return ui.input_select("xcol", "X Axis", choices=num_cols, selected=default)
 
     @render.ui
     def y_select():
         d = df()
         if d is None or d.empty:
-            return ui.input_selectize("ycols", "Y Axis (multiple)", choices=[], multiple=True)
+            return ui.input_selectize("ycols", "Y Axis", choices=[], multiple=True)
+        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(d[c])]
+        preferred = ["speed", "power", "energy"]
+        defaults = [c for c in preferred if c in num_cols] or num_cols[:1]
+        return ui.input_selectize("ycols", "Y Axis", choices=num_cols, selected=defaults, multiple=True)
 
-        num_cols = numeric_like_columns(d)
-        preferred = ["gps_speed", "speed", "lap_jm3_netjoule", "power", "energy"]
-
-        # pick all preferred cols that exist, or just the first numeric col
-        defaults = [c for c in preferred if c in num_cols]
-        if not defaults and num_cols:
-            defaults = [num_cols[0]]
-
-        return ui.input_selectize(
-            "ycols",
-            "Y Axis (multiple)",
-            choices=num_cols,
-            selected=defaults,
-            multiple=True
-        )
 
     @render.ui
     def plot():
