@@ -1,21 +1,20 @@
 import React, { useEffect, useState } from "react";
 import Select from "react-select";
 import UploadCsv from "./UploadCsv";
+
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
 const EV_URL = process.env.REACT_APP_EV_URL || "http://localhost:8000/ev/";
 
 export default function StaticTab() {
+  const [csvList, setCsvList] = useState([]);
+  const [selectedCsv, setSelectedCsv] = useState(null);
   const [bagList, setBagList] = useState([]);
   const [selectedBag, setSelectedBag] = useState(null);
   const [bagMessages, setBagMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [csvList, setCsvList] = useState([]);
-  const [selectedCsv, setSelectedCsv] = useState(null);
-  const [file, setFile] = useState(null);
-
-  // Fetch all CSVs
+  // fetch csv from backend
   const fetchCsvList = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/csv`);
@@ -35,25 +34,27 @@ export default function StaticTab() {
     fetchCsvList();
   }, []);
 
-  // Fetch available rosbags
+  // fetch rosbag list from backend
+  const fetchBagList = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/rosbags`);
+      const data = await response.json();
+      setBagList(
+        data.map((bag) => ({
+          label: bag.folder_name,
+          value: bag.folder_name,
+        }))
+      );
+    } catch (err) {
+      console.error("Failed to fetch bag list:", err);
+    }
+  };
+
   useEffect(() => {
-    const fetchBagList = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/rosbags`);
-        const data = await response.json();
-        setBagList(
-          data.map((bag) => ({
-            label: bag.folder_name,
-            value: bag.folder_name,
-          }))
-        );
-      } catch (err) {
-        console.error("Failed to fetch bag list:", err);
-      }
-    };
     fetchBagList();
   }, []);
 
+  // fetch rosbag messages for selected bag
   const fetchBagMessages = async (bagName) => {
     setIsLoading(true);
     setError(null);
@@ -71,16 +72,45 @@ export default function StaticTab() {
     }
   };
 
-  const iframeSrc = selectedCsv
-    ? `${EV_URL}?csv=${encodeURIComponent(selectedCsv.value)}`
-    : selectedBag
-    ? `${EV_URL}?bag=${encodeURIComponent(selectedBag.value)}`
-    : EV_URL;
+  // handle visualize button click
+  const handleVisualize = () => {
+    if (!selectedCsv) return;
+
+    const iframe = document.querySelector("iframe[title='Run Data Analysis']");
+    if (!iframe) return;
+
+    setIsLoading(true);
+    iframe.src = ""; // force clear
+
+    setTimeout(() => {
+      iframe.src = EV_URL;
+
+      iframe.onload = () => {
+        setIsLoading(false);
+        console.log("Sending CSV name to Shiny:", selectedCsv.value);
+
+        // Extract only the origin (scheme + host + port)
+        const shinyOrigin = new URL(EV_URL).origin;
+        console.log("iframe origin:", iframe.src);
+
+        iframe.contentWindow.postMessage(
+          { type: "load_csv", csv: selectedCsv.value },
+          shinyOrigin
+        );
+
+        // fallback if Shiny not ready yet
+        iframe.contentWindow.postMessage(
+          { type: "load_csv", csv: selectedCsv.value },
+          "*"
+        );
+      };
+    }, 150);
+  };
 
   return (
     <div className="parent">
       <div className="left-pane">
-        {/*CSV Upload Section*/}
+        {/* CSV Upload Section */}
         <h3 style={{ color: "white", marginBottom: "12px" }}>
           CSV Upload & Visualization
         </h3>
@@ -104,27 +134,18 @@ export default function StaticTab() {
         />
 
         <button
-          onClick={() => {
-            if (!selectedCsv) return;
-            // Just update iframe source; Shiny will auto-load the CSV
-            const newSrc = `${EV_URL}?csv=${encodeURIComponent(
-              selectedCsv.value
-            )}`;
-            const iframe = document.querySelector(
-              "iframe[title='Run Data Analysis']"
-            );
-            if (iframe) iframe.src = newSrc;
-          }}
+          onClick={handleVisualize}
           className="button-css"
           disabled={!selectedCsv || isLoading}
         >
-          Fetch & Visualize CSV
+          {isLoading ? "Loading..." : "Fetch & Visualize CSV"}
         </button>
 
         {/* ROSBag Section */}
-        <h3 style={{ color: "white", marginBottom: "12px" }}>
+        <h3 style={{ color: "white", margin: "20px 0 12px 0" }}>
           ROSBag Visualization
         </h3>
+
         <Select
           options={bagList}
           value={selectedBag}
@@ -132,6 +153,7 @@ export default function StaticTab() {
           isDisabled={isLoading}
           placeholder="Select a ROSBag"
         />
+
         <button
           onClick={() => selectedBag && fetchBagMessages(selectedBag.value)}
           className="button-css"
@@ -141,13 +163,20 @@ export default function StaticTab() {
         </button>
 
         {isLoading && <div className="spinner" />}
-        {error && <div className="error-text">{error}</div>}
+        {error && (
+          <div
+            className="error-text"
+            style={{ color: "red", marginTop: "10px" }}
+          >
+            {error}
+          </div>
+        )}
       </div>
 
       <div className="right-pane">
         <iframe
           title="Run Data Analysis"
-          src={iframeSrc}
+          src={EV_URL}
           style={{
             width: "100%",
             height: "100%",

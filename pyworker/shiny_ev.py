@@ -1,4 +1,3 @@
-# shiny_ev.py
 from shiny import App, ui, reactive, render
 import pandas as pd
 import plotly.express as px
@@ -9,7 +8,7 @@ import os
 import requests 
 from urllib.parse import urlparse, parse_qs
 
-API_BASE = os.getenv("API_BASE", "http://server:5000")  # inside Docker network
+API_BASE = os.getenv("API_BASE", "http://server:5000")
 
 def fetch_csv_from_backend(csv_name: str) -> pd.DataFrame | None:
     try:
@@ -18,19 +17,47 @@ def fetch_csv_from_backend(csv_name: str) -> pd.DataFrame | None:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         js = resp.json()
-        headers = js.get("headers", [])
-        rows = js.get("data", [])
+        headers, rows = js.get("headers", []), js.get("data", [])
         if not headers or not rows:
             print("[WARN] Empty CSV data received")
             return None
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+        print(f"[INFO] Loaded CSV with {len(df)} rows, {len(df.columns)} cols")
+        return df
     except Exception as e:
         print(f"[ERROR] Failed to fetch CSV: {e}")
         return None
-    
+
+POSTMESSAGE_JS = """
+console.log("[SHINY] PostMessage listener initializing...");
+
+window.addEventListener("message", (event) => {
+  console.log("[SHINY] Message received:", event.data, "from origin:", event.origin);
+  
+  const msg = event.data;
+  if (msg && typeof msg === "object" && msg.type === "load_csv") {
+    console.log("[SHINY] Valid load_csv message detected:", msg);
+
+    function trySend() {
+      if (window.Shiny && Shiny.setInputValue) {
+        Shiny.setInputValue("msg", msg, { priority: "event" });
+        console.log("[SHINY] Message delivered to Shiny input 'msg'");
+      } else {
+        console.log("[SHINY] Shiny not ready yet; retrying in 100ms...");
+        setTimeout(trySend, 100);
+      }
+    }
+
+    trySend();
+  }
+});
+
+console.log("[SHINY] PostMessage listener installed");
+"""
+
 CLICK_JS = """
 (function () {
-  let buffer = []; // keep last two clicked points
+  let buffer = [];
 
   function pushPoint(pt) {
     buffer.push(pt);
@@ -42,7 +69,7 @@ CLICK_JS = """
 
   function bind(graph) {
     if (!graph || typeof graph.on !== "function") return;
-    if (graph.__clickBound) return;  // avoid double-binding
+    if (graph.__clickBound) return;
     graph.__clickBound = true;
 
     graph.on("plotly_click", (ev) => {
@@ -60,27 +87,21 @@ CLICK_JS = """
     if (graph) bind(graph);
   }
 
-  // Observe DOM changes so we catch (re)renders
   try {
     const mo = new MutationObserver(tryBind);
     mo.observe(document.documentElement, { childList: true, subtree: true });
-  } catch (e) {
-    // MutationObserver not available; ignore
-  }
+  } catch (e) {}
 
-  // Also try on common lifecycle events
   window.addEventListener("DOMContentLoaded", tryBind);
   document.addEventListener("shiny:connected", tryBind);
 
-  // Small fallback retry loop in case timing is still off
   let tries = 0;
   const t = setInterval(() => {
     tries++;
     tryBind();
-    if (tries > 20) clearInterval(t); // ~1s total
+    if (tries > 20) clearInterval(t);
   }, 50);
 
-  // Clear selection from server
   if (window.Shiny && Shiny.addCustomMessageHandler) {
     Shiny.addCustomMessageHandler("clear-plot-selection", function () {
       buffer = [];
@@ -90,25 +111,11 @@ CLICK_JS = """
 })();
 """
 
-
-def to_numeric(s: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(s):
-        return s
-    return pd.to_numeric(s, errors="coerce")
-
-def zero_to_start(s: pd.Series) -> pd.Series:
-    if s.empty:
-        return s
-    idx = s.first_valid_index()
-    if idx is None:
-        return s
-    return s - s.loc[idx]
-
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.h2("Run Data Analysis"),
         ui.h4("Plot options"),
-        ui.input_select("plot_type", "Plot type", choices = ["line", "scatter"], selected="line"),
+        ui.input_select("plot_type", "Plot type", choices=["line", "scatter"], selected="line"),
         ui.hr(),
         ui.h4("Select axes"),
         ui.output_ui("x_select"),
@@ -125,10 +132,13 @@ app_ui = ui.page_sidebar(
         ui.output_text("sel_points"),
         open="open",
     ),
+    
     ui.layout_column_wrap(
-        # Ensure Plotly is loaded before our figure HTML runs
-        ui.tags.script({"defer": True, "src": "https://cdn.plot.ly/plotly-2.29.1.min.js"}),
-        ui.tags.script(CLICK_JS),
+        ui.tags.head(
+            ui.tags.script({"defer": True, "src": "https://cdn.plot.ly/plotly-2.29.1.min.js"}),
+            ui.tags.script(ui.HTML(POSTMESSAGE_JS)),
+            ui.tags.script(ui.HTML(CLICK_JS))
+        ),
         ui.card(ui.card_header("Preview"), ui.output_ui("preview")),
         ui.card(ui.card_header("Reactive plot"), ui.output_ui("plot")),
         ui.card(
@@ -137,53 +147,38 @@ app_ui = ui.page_sidebar(
             ui.output_text("delta_y"),
             ui.output_text("slope"),
         ),
-        width=1 / 1,
+        width=1/1,
     ),
 )
 
 def server(input, output, session):
-    # Parse ?csv=<name> from URL when app loads
-    query = session.input
     csv_name = reactive.Value(None)
 
-    
     @reactive.effect
-    def _on_start():
-        try:
-            # Try pulling from ASGI scope (always available)
-            scope = getattr(session, "http_conn", None)
-            if scope and hasattr(scope, "scope"):
-                raw_path = scope.scope.get("path", "")
-                raw_qs = scope.scope.get("query_string", b"").decode()
-                if raw_qs:
-                    params = parse_qs(raw_qs)
-                    if "csv" in params:
-                        csv_name.set(params["csv"][0])
-                        print(f"[INFO] Selected CSV = {params['csv'][0]}")
-                    else:
-                        print(f"[INFO] Query string present but no ?csv param: {raw_qs}")
-                else:
-                    print(f"[INFO] No query string for path {raw_path}")
-            else:
-                print("[WARN] session.http_conn.scope not available yet")
-        except Exception as e:
-            print(f"[ERROR] Could not read query string: {e}")
-
+    @reactive.event(input.msg)
+    def _handle_post_message():
+        msg = input.msg()
+        print(f"[SERVER] Received msg input: {msg}")
+        if not msg:
+            return
+        if isinstance(msg, dict) and msg.get("type") == "load_csv":
+            chosen = msg.get("csv")
+            if chosen:
+                csv_name.set(chosen)
+                print(f"[INFO] CSV set via postMessage: {chosen}")
 
     @reactive.Calc
     def df() -> pd.DataFrame | None:
         name = csv_name.get()
+        print(f"[DEBUG] df() called, csv_name = {name}")
         if not name:
             return None
         d = fetch_csv_from_backend(name)
         if d is None or d.empty:
             print(f"[WARN] No data for {name}")
             return None
-        # Normalize headers
         d.columns = [c.strip().lower() for c in d.columns]
         return d
-
-
 
     @render.ui
     def preview():
@@ -251,43 +246,13 @@ def server(input, output, session):
             return "Slope m = undefined (vertical line)"
         return f"Slope m = {dvy/dvx:.6g}"
 
-    def numeric_like_columns(_df: pd.DataFrame) -> list[str]:
-        cols: list[str] = []
-        for c in _df.columns:
-            s = _df[c]
-            if pd.api.types.is_numeric_dtype(s):
-                sn = s
-            else:
-                sn = pd.to_numeric(s, errors="coerce")
-
-            sn_non_na = sn.dropna()
-            if sn_non_na.empty:
-                continue
-
-            if np.all(np.isclose(sn_non_na.to_numpy(), 0.0, rtol=0.0, atol=0.0)):
-                continue
-
-            cols.append(c)
-        return cols
-
-    @render.ui
-    def plot_card():
-        plot_type = input.plot_type()
-        title = "Line Plot" if plot_type == "line" else "Scatter Plot"
-        return ui.card(
-            ui.card_header(title),
-            ui.card_body(
-                ui.output_ui("plot")
-            )
-        )
-
     @render.ui
     def x_select():
         d = df()
         if d is None or d.empty:
             return ui.input_select("xcol", "X Axis", choices=[])
-        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(d[c])]
-        preferred = ["timestamp", "time", "dist", "distance"]
+        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
+        preferred = ["timestamp", "time", "ros_time_sec", "dist", "distance"]
         default = next((c for c in preferred if c in num_cols), num_cols[0] if num_cols else None)
         return ui.input_select("xcol", "X Axis", choices=num_cols, selected=default)
 
@@ -296,11 +261,10 @@ def server(input, output, session):
         d = df()
         if d is None or d.empty:
             return ui.input_selectize("ycols", "Y Axis", choices=[], multiple=True)
-        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(d[c])]
-        preferred = ["speed", "power", "energy"]
+        num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
+        preferred = ["bus_voltage", "current", "power", "speed", "energy"]
         defaults = [c for c in preferred if c in num_cols] or num_cols[:1]
         return ui.input_selectize("ycols", "Y Axis", choices=num_cols, selected=defaults, multiple=True)
-
 
     @render.ui
     def plot():
@@ -308,34 +272,44 @@ def server(input, output, session):
         if d is None or d.empty:
             return ui.HTML("Waiting for CSV data...")
 
-        num_cols = numeric_like_columns(d)
-        if not num_cols:
-            return ui.HTML("No numeric columns found in CSV.")
-        xcol = input.xcol() or num_cols[0]
-        ycols = input.ycols() or num_cols[1:2]
+        numeric_cols = [c for c in d.columns
+                        if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
+        if not numeric_cols:
+            return ui.HTML("No numeric columns found.")
 
-        x = to_numeric(d[xcol])
-        if any(k in xcol.lower() for k in ["time", "timestamp", "dist", "distance"]):
-            x = zero_to_start(x)
+        xcol = input.xcol() or next((c for c in numeric_cols if "time" in c.lower()), numeric_cols[0])
+        ycols = input.ycols() or [c for c in numeric_cols if c != xcol] or numeric_cols[1:]
 
+        print(f"[INFO] Plotting X={xcol}, Y={ycols}")
+        x = pd.to_numeric(d[xcol], errors="coerce")
         out = pd.DataFrame({"x": x})
         for yc in ycols:
-            out[yc] = to_numeric(d[yc])
+            out[yc] = pd.to_numeric(d[yc], errors="coerce")
 
-        out_long = out.melt(id_vars=["x"], value_vars=ycols,
-                            var_name="Series", value_name="y").dropna()
-
-        fig = px.line(out_long, x="x", y="y", color="Series") \
-            if input.plot_type() == "line" \
+        out_long = out.melt(id_vars=["x"], var_name="Series", value_name="y").dropna()
+        plot_type = input.plot_type() or "line"
+        fig = px.line(out_long, x="x", y="y", color="Series") if plot_type == "line" \
             else px.scatter(out_long, x="x", y="y", color="Series")
-
+        
+        # Apply axis ranges from user inputs
+        xmin = input.xmin()
+        xmax = input.xmax()
+        ymin = input.ymin()
+        ymax = input.ymax()
+        
         fig.update_layout(
             legend_title_text="",
             margin=dict(l=40, r=20, t=40, b=40),
             xaxis_title=xcol,
-            yaxis_title="Values"
+            yaxis_title="Values",
+            xaxis=dict(
+                range=[xmin, xmax] if xmin is not None and xmax is not None else None
+            ),
+            yaxis=dict(
+                range=[ymin, ymax] if ymin is not None and ymax is not None else None
+            )
         )
-
         html = fig.to_html(include_plotlyjs=False, full_html=False)
         return ui.HTML(f"<div id='plot_container'>{html}</div>")
+
 app = App(app_ui, server)
