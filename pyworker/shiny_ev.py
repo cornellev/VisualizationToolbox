@@ -140,7 +140,11 @@ app_ui = ui.page_sidebar(
             ui.tags.script(ui.HTML(CLICK_JS))
         ),
         ui.card(ui.card_header("Preview"), ui.output_ui("preview")),
-        ui.card(ui.card_header("Reactive plot"), ui.output_ui("plot")),
+        ui.card(
+        ui.card_header("Reactive plot"),
+        ui.output_ui("plot_title_ui"),  # dynamically shown title input
+        ui.output_ui("plot")
+            ),
         ui.card(
             ui.card_header("Results"),
             ui.output_text("delta_x"),
@@ -149,6 +153,7 @@ app_ui = ui.page_sidebar(
         ),
         width=1/1,
     ),
+
 )
 
 def server(input, output, session):
@@ -267,6 +272,17 @@ def server(input, output, session):
         return ui.input_selectize("ycols", "Y Axis", choices=num_cols, selected=defaults, multiple=True)
 
     @render.ui
+    def plot_title_ui():
+        d = df()
+        if d is None or d.empty:
+            return None  # Don't show title input until CSV is loaded
+        return ui.div(
+            ui.input_text("plot_title", None, placeholder="Enter a graph title..."),
+            style="text-align:center; margin-bottom:10px;"
+        )
+
+
+    @render.ui
     def plot():
         d = df()
         if d is None or d.empty:
@@ -298,8 +314,15 @@ def server(input, output, session):
         ymax = input.ymax()
         
         fig.update_layout(
+            title={
+                "text": input.plot_title() or "",
+                "x": 0.45,
+                "xanchor": "center",
+                "yanchor": "top"
+            },
+            title_font=dict(size=20, family="Arial", color="black"),
             legend_title_text="",
-            margin=dict(l=40, r=20, t=40, b=40),
+            margin=dict(l=40, r=20, t=80, b=40),
             xaxis_title=xcol,
             yaxis_title="Values",
             xaxis=dict(
@@ -309,6 +332,8 @@ def server(input, output, session):
                 range=[ymin, ymax] if ymin is not None and ymax is not None else None
             )
         )
+        fig.update_layout(modebar_add=["toImage"])
+
         html = fig.to_html(include_plotlyjs=False, full_html=False)
         return ui.HTML(f"<div id='plot_container'>{html}</div>")
 
