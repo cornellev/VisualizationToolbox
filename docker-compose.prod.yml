@@ -4,13 +4,9 @@ on:
   workflow_dispatch: {}
   push:
     branches: [ main ]
-    paths:
-      - "server/**"
-      - "client/**"
-      - "pyworker/**"
-      - "nginx/**"
-      - "docker-bake.hcl"
-      - ".github/workflows/build.yml"
+    push:
+    branches: ["**"]
+    paths: ["**"] 
 
 permissions:
   contents: read
