@@ -1,0 +1,22 @@
+node_modules
+coverage
+logs
+*.log
+npm-debug.log*
+.DS_Store
+
+.env
+.env.*
+.git
+.gitignore
+
+docker-compose*.yml
+Dockerfile
+
+# transpiled/build output if you have it
+dist
+build
+
+# tests
+**/*.test.*
+**/__tests__/

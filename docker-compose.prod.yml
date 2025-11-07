@@ -1,0 +1,61 @@
+version: "3.9"
+
+networks:
+  web:
+  internal:
+
+volumes:
+  pgdata:
+  uploads-folder:
+  saved_data:
+
+services:
+  nginx:
+    image: ghcr.io/cornellev/viz-nginx:latest
+    depends_on: [client, server, pyworker]
+    ports: ["80:80"]
+    networks: [web, internal]
+
+  client:
+    image: ghcr.io/cornellev/viz-client:latest
+    networks: [internal]
+
+  server:
+    image: ghcr.io/cornellev/viz-server:latest
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+      PYWORKER_URL: http://pyworker:8000
+    volumes:
+      - uploads-folder:/app/uploads-folder
+      - saved_data:/app/saved_data
+    depends_on: [db, pyworker]
+    networks: [internal]
+
+  pyworker:
+    image: ghcr.io/cornellev/viz-worker:latest
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    volumes:
+      - uploads-folder:/app/uploads-folder
+      - saved_data:/app/saved_data
+    depends_on: [db]
+    networks: [internal]
+
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
