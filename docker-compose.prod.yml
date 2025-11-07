@@ -1,41 +1,63 @@
-name: Build & Push (GHCR)
+version: "3.9"
 
-on:
-  workflow_dispatch: {}
-  push:
-    branches: [ main ]
-    push:
-    branches: ["**"]
-    paths: ["**"] 
+networks:
+  web:
+  internal:
 
-permissions:
-  contents: read
-  packages: write
+volumes:
+  pgdata:
+  uploads-folder:
+  saved_data:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    depends_on: [client, server, pyworker]
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [web, internal]
 
-      - name: Login to GHCR
-        run: echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+  client:
+    image: ghcr.io/cornellev/viz-client:latest
+    networks: [internal]
 
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
+  server:
+    image: ghcr.io/cornellev/viz-server:latest
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+      PYWORKER_URL: http://pyworker:8000
+    volumes:
+      - uploads-folder:/app/uploads-folder
+      - saved_data:/app/saved_data
+    depends_on: [db, pyworker]
+    networks: [internal]
 
-      - name: Build & push :latest (main only)
-        if: github.ref == 'refs/heads/main'
-        run: |
-          docker buildx bake -f docker-bake.hcl \
-            --set REGISTRY=ghcr.io/cornellev \
-            --set TAG=latest \
-            --push
+  pyworker:
+    image: ghcr.io/cornellev/viz-worker:latest
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_PORT: 5432
+    volumes:
+      - uploads-folder:/app/uploads-folder
+      - saved_data:/app/saved_data
+    depends_on: [db]
+    networks: [internal]
 
-      - name: Build & push :short-sha
-        run: |
-          SHA_TAG=${GITHUB_SHA::7}
-          docker buildx bake -f docker-bake.hcl \
-            --set REGISTRY=ghcr.io/cornellev \
-            --set TAG=$SHA_TAG \
-            --push
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
