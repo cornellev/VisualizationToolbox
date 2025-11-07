@@ -1,23 +1,8 @@
-variable "REGISTRY" {
-  default = "ghcr.io/cornellev"
-}
-
-variable "TAG" {
-  default = "latest"
-}
+variable "REGISTRY" { default = "ghcr.io/cornellev" }
+variable "TAG"      { default = "latest" }
 
 group "default" {
-  targets = ["nginx", "server", "client", "worker"]
-}
-
-target "nginx" {
-  context   = "./nginx"
-  tags      = ["${REGISTRY}/viz-nginx:${TAG}"]
-  platforms = ["linux/amd64"]
-  labels = {
-    "org.opencontainers.image.source" = "https://github.com/cornellev/VisualizationToolbox"
-  }
-  push      = true
+  targets = ["server", "client", "worker"]
 }
 
 target "server" {
