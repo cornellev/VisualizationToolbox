@@ -150,23 +150,36 @@ app.get("/api/rosbags", async (req, res) => {
 // GET /api/rosbags/:folderName
 app.get("/api/rosbags/:folderName", async (req, res) => {
   const { folderName } = req.params;
-  try {
-    // Fetch all messages for the given folder
-    const result = await pool.query(
-      `SELECT topic, timestamp, data
-       FROM rosbag_messages
-       WHERE bag_name = $1
-       ORDER BY timestamp ASC`,
-      [folderName]
-    );
+  const topic = req.query.topic; 
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "No messages found for this bag" });
+  try {
+    let query = `
+      SELECT topic, timestamp, data
+      FROM rosbag_messages
+      WHERE bag_name = $1
+    `;
+    const params = [folderName];
+
+    // Add filtering if topic is provided
+    if (topic) {
+      query += " AND topic = $2";
+      params.push(topic);
     }
 
-    res.json(result.rows); // return all messages in order
+    query += " ORDER BY timestamp ASC";
+
+    const result = await pool.query(query, params);
+
+    if (result.rows.length === 0) {
+      console.warn(`No messages found for bag='${folderName}'${topic ? ` and topic='${topic}'` : ""}`);
+      return res.status(404).json({ error: "No messages found for this bag/topic" });
+    }
+
+    // Return the filtered messages
+    res.json(result.rows);
+
   } catch (err) {
-    console.error(err);
+    console.error("Error fetching messages:", err);
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
@@ -198,5 +211,20 @@ app.get("/api/csv/:name", async (req, res) => {
   } catch (err) {
     console.error("Error fetching CSV:", err);
     res.status(500).json({ error: "Failed to fetch CSV" });
+  }
+});
+
+// GET /api/rosbags/:folderName/topics
+app.get("/api/rosbags/:folderName/topics", async (req, res) => {
+  const { folderName } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT DISTINCT topic FROM rosbag_messages WHERE bag_name = $1 ORDER BY topic ASC",
+      [folderName]
+    );
+    res.json({ topics: result.rows.map((r) => r.topic) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch topics" });
   }
 });

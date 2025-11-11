@@ -11,10 +11,12 @@ export default function StaticTab() {
   const [bagList, setBagList] = useState([]);
   const [selectedBag, setSelectedBag] = useState(null);
   const [bagMessages, setBagMessages] = useState([]);
+  const [topics, setTopics] = useState([]);
+  const [selectedTopic, setSelectedTopic] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // fetch csv from backend
+  // Fetch all CSVs
   const fetchCsvList = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/csv`);
@@ -54,23 +56,20 @@ export default function StaticTab() {
     fetchBagList();
   }, []);
 
-  // fetch rosbag messages for selected bag
-  const fetchBagMessages = async (bagName) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE}/api/rosbags/${bagName}`);
-      if (!response.ok) throw new Error("Failed to fetch rosbag messages");
-      const data = await response.json();
-      setBagMessages(data.rosbag_json || data);
-    } catch (err) {
-      console.error("Error fetching bag data:", err);
-      setError("Unable to load rosbag messages.");
-      setBagMessages([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  useEffect(() => {
+    const fetchTopics = async () => {
+      if (!selectedBag) return;
+      try {
+        const response = await fetch(`${API_BASE}/api/rosbags/${selectedBag.value}/topics`);
+        const data = await response.json();
+        setTopics(data.topics.map((t) => ({ label: t, value: t })));
+      } catch (err) {
+        console.error("Failed to fetch topics:", err);
+        setTopics([]);
+      }
+    };
+    fetchTopics();
+  }, [selectedBag]);
 
   // handle visualize button click
   const handleVisualize = () => {
@@ -101,6 +100,37 @@ export default function StaticTab() {
         // fallback if Shiny not ready yet
         iframe.contentWindow.postMessage(
           { type: "load_csv", csv: selectedCsv.value },
+          "*"
+        );
+      };
+    }, 150);
+  };
+
+  const handleRosbagVisualize = () => {
+    if (!selectedBag || !selectedTopic) return;
+
+    const iframe = document.querySelector("iframe[title='Run Data Analysis']");
+    if (!iframe) return;
+
+    setIsLoading(true);
+    iframe.src = ""; // force refresh
+
+    setTimeout(() => {
+      iframe.src = EV_URL;
+
+      iframe.onload = () => {
+        setIsLoading(false);
+        console.log("Sending ROSBag + topic to Shiny:", selectedBag.value, selectedTopic.value);
+
+        const shinyOrigin = new URL(EV_URL).origin;
+        iframe.contentWindow.postMessage(
+          { type: "load_rosbag", bag: selectedBag.value, topic: selectedTopic.value },
+          shinyOrigin
+        );
+
+        // fallback
+        iframe.contentWindow.postMessage(
+          { type: "load_rosbag", bag: selectedBag.value, topic: selectedTopic.value },
           "*"
         );
       };
@@ -154,12 +184,20 @@ export default function StaticTab() {
           placeholder="Select a ROSBag"
         />
 
+        <Select
+          options={topics}
+          value={selectedTopic}
+          onChange={setSelectedTopic}
+          isDisabled={!selectedBag || isLoading}
+          placeholder="Select a Topic"
+        />
         <button
-          onClick={() => selectedBag && fetchBagMessages(selectedBag.value)}
+          onClick={handleRosbagVisualize}
           className="button-css"
-          disabled={!selectedBag || isLoading}
+          disabled={!selectedBag || !selectedTopic || isLoading}
         >
-          Fetch Data
+
+          {isLoading ? "Loading..." : "Fetch & Visualize ROSBag"}
         </button>
 
         {isLoading && <div className="spinner" />}

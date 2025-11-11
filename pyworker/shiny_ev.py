@@ -4,7 +4,6 @@ import plotly.express as px
 import numpy as np
 from math import isinf
 import os
-
 import requests 
 from urllib.parse import urlparse, parse_qs
 
@@ -35,13 +34,13 @@ window.addEventListener("message", (event) => {
   console.log("[SHINY] Message received:", event.data, "from origin:", event.origin);
   
   const msg = event.data;
-  if (msg && typeof msg === "object" && msg.type === "load_csv") {
-    console.log("[SHINY] Valid load_csv message detected:", msg);
+  if (msg && typeof msg === "object" && (msg.type === "load_csv" || msg.type === "load_rosbag")) {
+    console.log("[SHINY] Valid message detected:", msg);
 
     function trySend() {
       if (window.Shiny && Shiny.setInputValue) {
         Shiny.setInputValue("msg", msg, { priority: "event" });
-        console.log("[SHINY] Message delivered to Shiny input 'msg'");
+        console.log(`[SHINY] Message delivered to Shiny input 'msg' (${msg.type})`);
       } else {
         console.log("[SHINY] Shiny not ready yet; retrying in 100ms...");
         setTimeout(trySend, 100);
@@ -103,7 +102,7 @@ CLICK_JS = """
   }, 50);
 
   if (window.Shiny && Shiny.addCustomMessageHandler) {
-    Shiny.addCustomMessageHandler("clear-plot-selection", function () {
+    Shiny.addCustomMessageHandler("clear-plot-selection", function (message) {
       buffer = [];
       Shiny.setInputValue("selected_points", buffer, { priority: "event" });
     });
@@ -156,8 +155,12 @@ app_ui = ui.page_sidebar(
 
 )
 
+from urllib.parse import quote
+
 def server(input, output, session):
     csv_name = reactive.Value(None)
+    bag_name = reactive.Value(None)
+    topic_name = reactive.Value(None)
 
     @reactive.effect
     @reactive.event(input.msg)
@@ -166,24 +169,70 @@ def server(input, output, session):
         print(f"[SERVER] Received msg input: {msg}")
         if not msg:
             return
-        if isinstance(msg, dict) and msg.get("type") == "load_csv":
-            chosen = msg.get("csv")
-            if chosen:
-                csv_name.set(chosen)
-                print(f"[INFO] CSV set via postMessage: {chosen}")
+
+        if isinstance(msg, dict):
+            msg_type = msg.get("type")
+            if msg_type == "load_csv":
+                chosen = msg.get("csv")
+                if chosen:
+                    csv_name.set(chosen)
+                    bag_name.set(None)
+                    topic_name.set(None)
+                    print(f"[INFO] CSV set via postMessage: {chosen}")
+
+            elif msg_type == "load_rosbag":
+                b = msg.get("bag")
+                t = msg.get("topic")
+                if b and t:
+                    bag_name.set(b)
+                    topic_name.set(t)
+                    csv_name.set(None)
+                    print(f"[INFO] ROSBag set via postMessage: bag={b}, topic={t}")
 
     @reactive.Calc
     def df() -> pd.DataFrame | None:
-        name = csv_name.get()
-        print(f"[DEBUG] df() called, csv_name = {name}")
-        if not name:
-            return None
-        d = fetch_csv_from_backend(name)
-        if d is None or d.empty:
-            print(f"[WARN] No data for {name}")
-            return None
-        d.columns = [c.strip().lower() for c in d.columns]
-        return d
+        """Fetch data based on whether a CSV or ROSBag is selected."""
+        if csv_name.get():
+            name = csv_name.get()
+            print(f"[DEBUG] df(): fetching CSV {name}")
+            d = fetch_csv_from_backend(name)
+            if d is None or d.empty:
+                print(f"[WARN] No data for {name}")
+                return None
+            d.columns = [c.strip().lower() for c in d.columns]
+            return d
+
+        if bag_name.get() and topic_name.get():
+            try:
+                url = f"{API_BASE}/api/rosbags/{bag_name.get()}?topic={quote(topic_name.get())}"
+                print(f"[INFO] Fetching ROSBag data from {url}")
+                resp = requests.get(url, timeout=15)
+                resp.raise_for_status()
+
+                js = resp.json()
+                print(f"[DEBUG] ROSBag API returned type={type(js)}, len={len(js) if isinstance(js, list) else 'N/A'}")
+                if isinstance(js, list) and len(js) > 0:
+                    print(f"[DEBUG] First item sample: {js[0]}")
+                data = js  # always a list of {topic, timestamp, data}
+                if not isinstance(data, list) or not data:
+                    print("[WARN] Unexpected or empty ROSBag response format")
+                    return None
+                
+                df = pd.json_normalize(data, sep='_')
+
+                df.columns = [c.replace("data_", "") for c in df.columns]
+                df.columns = [c.strip().lower() for c in df.columns]
+
+                print(f"[INFO] Loaded ROSBag '{bag_name.get()}' with {len(df)} rows and {len(df.columns)} columns")
+                print(f"[DEBUG] Columns: {list(df.columns)[:10]}...")
+
+                return df
+
+            except Exception as e:
+                print(f"[ERROR] Failed to fetch ROSBag data: {e}")
+                return None
+
+        return None
 
     @render.ui
     def preview():
