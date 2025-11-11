@@ -1,4 +1,4 @@
-FROM node:20 AS server
+FROM node:20-slim AS server
 
 WORKDIR /app
 

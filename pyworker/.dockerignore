@@ -1,0 +1,38 @@
+# VCS & env
+.git
+.gitignore
+.env
+.env.*
+
+# Node projects that shouldn't go into the ROS image
+client/
+server/
+**/node_modules
+
+# Large/random artifacts
+**/*.bag
+**/*.db3
+**/*.zip
+**/*.gz
+**/*.tar
+**/*.tar.*
+
+# Local ROS build outputs (if present outside container)
+ros_ws/build
+ros_ws/log
+ros_ws/install
+
+# Python cruft
+__pycache__/
+*.pyc
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Dockerfiles/compose not needed in context
+Dockerfile
+docker-compose*.yml
+
+# misc not needed
+architecture.png

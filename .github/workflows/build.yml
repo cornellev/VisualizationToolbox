@@ -1,0 +1,46 @@
+name: Build & Push (GHCR)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["main"]
+    paths:
+      - "server/**"
+      - "client/**"
+      - "pyworker/**"
+      - "docker-bake.hcl"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # latest for main
+      - name: Build & Push :latest (main only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ghcr.io/cornellev
+          TAG: latest
+        run: |
+          docker buildx bake -f docker-bake.hcl --push
+
+      # short SHA every run (handy for rollbacks)
+      - name: Build & Push :short-sha
+        env:
+          REGISTRY: ghcr.io/cornellev
+          TAG: ${{ github.sha }}
+        run: |
+          SHORT="${TAG::7}"
+          REGISTRY="$REGISTRY" TAG="$SHORT" docker buildx bake -f docker-bake.hcl --push

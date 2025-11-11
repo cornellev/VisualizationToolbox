@@ -37,7 +37,7 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --upgrade pip
+RUN pip3 install --no-cache-dir --upgrade pip pip-tools pipdeptree
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy rest of your app

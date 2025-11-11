@@ -1,0 +1,28 @@
+# deps & builds
+node_modules
+build
+dist
+.cache
+.eslintcache
+
+# noise
+coverage
+*.log
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+
+# env & vcs
+.env
+.env.*
+.git
+.gitignore
+
+# docker/dev
+docker-compose*.yml
+Dockerfile
+
+# tests/assets not needed for prod build
+**/*.test.*
+**/__tests__/
+**/__mocks__/
