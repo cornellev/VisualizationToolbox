@@ -21,7 +21,7 @@ Workflows are divided into:
 
 ## How to Use 
 1. Clone the repository
-2. Run ```docker-compose up --build```
+2. Run ```docker compose up --build```
 
 ## Application Architecture
 ![Application Architecture](./architecture.png)
