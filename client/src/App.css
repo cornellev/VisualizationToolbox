@@ -73,6 +73,26 @@
   width: 100%;
 }
 
+.input-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #d5d9ff;
+}
+
+.input-label input {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.input-label small {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .right-pane {
   flex: 1;
   min-height: 85vh;
@@ -140,6 +160,48 @@
   flex-direction: column;
   gap: 8px;
   min-height: 70vh;
+}
+
+.stream-status {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.raw-viewer {
+  background: rgba(15, 23, 42, 0.45);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 70vh;
+}
+
+.raw-viewer__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.raw-viewer__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.raw-viewer__pre {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 16px;
+  border-radius: 8px;
+  color: #e5e7eb;
+  max-height: 60vh;
+  overflow: auto;
 }
 
 .tabs {

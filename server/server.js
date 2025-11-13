@@ -6,12 +6,30 @@ const path = require("path");
 const multer = require("multer");
 const axios = require("axios");
 const { createProxyMiddleware } = require("http-proxy-middleware");
+const QueryStream = require("pg-query-stream");
 require("dotenv").config();
 const pool = require("./db");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const DEFAULT_ROS_MESSAGE_LIMIT = parseInt(
+  process.env.ROS_MESSAGE_LIMIT || "500",
+  10
+);
+const MAX_ROS_MESSAGE_LIMIT = parseInt(
+  process.env.ROS_MESSAGE_MAX_LIMIT || "2000",
+  10
+);
+const ROS_STREAM_BATCH_SIZE = parseInt(
+  process.env.ROS_STREAM_BATCH_SIZE || "100",
+  10
+);
+const ROS_STREAM_HIGH_WATERMARK = parseInt(
+  process.env.ROS_STREAM_HIGH_WATERMARK || "16",
+  10
+);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -150,38 +168,214 @@ app.get("/api/rosbags", async (req, res) => {
 // GET /api/rosbags/:folderName
 app.get("/api/rosbags/:folderName", async (req, res) => {
   const { folderName } = req.params;
-  const topic = req.query.topic; 
+  const { topic, cursor } = req.query;
+  const rawLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(
+    Math.max(isNaN(rawLimit) ? DEFAULT_ROS_MESSAGE_LIMIT : rawLimit, 1),
+    MAX_ROS_MESSAGE_LIMIT
+  );
 
   try {
+    let paramIndex = 1;
     let query = `
-      SELECT topic, timestamp, data
+      SELECT topic, timestamp, data::text AS data
       FROM rosbag_messages
-      WHERE bag_name = $1
+      WHERE bag_name = $${paramIndex}
     `;
     const params = [folderName];
 
-    // Add filtering if topic is provided
     if (topic) {
-      query += " AND topic = $2";
       params.push(topic);
+      paramIndex++;
+      query += ` AND topic = $${paramIndex}`;
     }
 
-    query += " ORDER BY timestamp ASC";
+    if (cursor) {
+      params.push(cursor);
+      paramIndex++;
+      query += ` AND timestamp > $${paramIndex}`;
+    }
+
+    params.push(limit + 1);
+    query += ` ORDER BY timestamp ASC LIMIT $${params.length}`;
 
     const result = await pool.query(query, params);
-
-    if (result.rows.length === 0) {
-      console.warn(`No messages found for bag='${folderName}'${topic ? ` and topic='${topic}'` : ""}`);
-      return res.status(404).json({ error: "No messages found for this bag/topic" });
+    let rows = result.rows;
+    const hasMore = rows.length > limit;
+    if (hasMore) {
+      rows = rows.slice(0, limit);
     }
 
-    // Return the filtered messages
-    res.json(result.rows);
+    if (rows.length === 0) {
+      return res.json({ messages: [], nextCursor: null, hasMore: false, count: 0 });
+    }
 
+    const messages = rows.map((row) => {
+      let dataPayload;
+      try {
+        dataPayload = row.data ? JSON.parse(row.data) : null;
+      } catch (err) {
+        console.warn("Failed to parse rosbag payload for", folderName, err.message);
+        dataPayload = row.data;
+      }
+
+      return {
+        topic: row.topic,
+        timestamp:
+          typeof row.timestamp === "bigint"
+            ? row.timestamp.toString()
+            : String(row.timestamp),
+        data: dataPayload,
+      };
+    });
+
+    const nextCursor = hasMore
+      ? messages[messages.length - 1].timestamp
+      : null;
+
+    res.json({
+      messages,
+      nextCursor,
+      hasMore,
+      count: messages.length,
+      limit,
+    });
   } catch (err) {
     console.error("Error fetching messages:", err);
     res.status(500).json({ error: "Failed to fetch messages" });
   }
+});
+
+// Stream /api/rosbags/:folderName/stream
+app.get("/api/rosbags/:folderName/stream", async (req, res) => {
+  const { folderName } = req.params;
+  const { topic } = req.query;
+  const rawLimit = parseInt(req.query.limit, 10);
+  const limit = isNaN(rawLimit)
+    ? null
+    : Math.min(Math.max(rawLimit, 1), MAX_ROS_MESSAGE_LIMIT);
+
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    console.error("Failed to acquire DB client for stream:", err);
+    return res.status(500).json({ error: "Failed to start stream" });
+  }
+
+  let query = `
+      SELECT topic, timestamp, data::text AS data
+    FROM rosbag_messages
+    WHERE bag_name = $1
+  `;
+  const params = [folderName];
+
+  if (topic) {
+    params.push(topic);
+    query += ` AND topic = $${params.length}`;
+  }
+
+  query += " ORDER BY timestamp ASC";
+
+  if (limit !== null) {
+    params.push(limit);
+    query += ` LIMIT $${params.length}`;
+  }
+
+  const queryStream = new QueryStream(query, params, {
+    highWaterMark: ROS_STREAM_HIGH_WATERMARK,
+    batchSize: ROS_STREAM_BATCH_SIZE,
+  });
+
+  const stream = client.query(queryStream);
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Transfer-Encoding", "chunked");
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  const writeJsonLine = (payload) =>
+    res.write(`${JSON.stringify(payload)}\n`, "utf8");
+
+  writeJsonLine({
+    type: "meta",
+    bag: folderName,
+    topic: topic || null,
+    limit,
+  });
+
+  let rowCount = 0;
+  let clientReleased = false;
+  let streamClosed = false;
+
+  const releaseClient = () => {
+    if (!clientReleased) {
+      clientReleased = true;
+      client.release();
+    }
+  };
+
+  const closeStream = () => {
+    if (!streamClosed) {
+      streamClosed = true;
+      stream.destroy();
+    }
+  };
+
+  stream.on("data", (row) => {
+    rowCount += 1;
+    const timestampValue =
+      typeof row.timestamp === "bigint"
+        ? row.timestamp.toString()
+        : String(row.timestamp);
+    const topicValue = JSON.stringify(row.topic ?? null);
+    const rawData =
+      typeof row.data === "string"
+        ? row.data
+        : row.data?.toString("utf8") ?? "null";
+    const trimmedData = rawData.trim();
+    const dataText = trimmedData.length ? trimmedData : "null";
+
+    const payloadLine = `{"topic":${topicValue},"timestamp":"${timestampValue}","data":${dataText}}\n`;
+
+    const shouldContinue = res.write(payloadLine, "utf8");
+    if (!shouldContinue) {
+      stream.pause();
+      res.once("drain", () => stream.resume());
+    }
+  });
+
+  stream.on("end", () => {
+    streamClosed = true;
+    writeJsonLine({ type: "meta", status: "complete", rows: rowCount });
+    res.end();
+    releaseClient();
+  });
+
+  stream.on("error", (err) => {
+    console.error("Rosbag stream failed:", err);
+    if (res.writableEnded) {
+      // connection already closed
+    } else if (!res.headersSent) {
+      res.status(500).json({ error: "Stream failed" });
+    } else {
+      writeJsonLine({ type: "error", message: "Stream failed" });
+      res.end();
+    }
+    closeStream();
+    releaseClient();
+  });
+
+  req.on("aborted", () => {
+    closeStream();
+    releaseClient();
+  });
+
+  res.on("close", () => {
+    closeStream();
+    releaseClient();
+  });
 });
 
 // GET /api/csv

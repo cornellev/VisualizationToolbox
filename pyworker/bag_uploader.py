@@ -66,9 +66,18 @@ def parse_csv_string(s, headers=None):
         return dict(zip(headers, parts))
     return {f"col{i+1}": val for i, val in enumerate(parts)}
 
+def _clean_key(name):
+    if isinstance(name, str):
+        return name.lstrip("_")
+    return name
+
+
 def msg_to_dict(msg, headers=None):
     if hasattr(msg, "__slots__"):
-        return {slot: msg_to_dict(getattr(msg, slot)) for slot in msg.__slots__}
+        return {
+            _clean_key(slot): msg_to_dict(getattr(msg, slot))
+            for slot in msg.__slots__
+        }
     elif isinstance(msg, (list, tuple)):
         return [msg_to_dict(v) for v in msg]
     elif isinstance(msg, dict):
