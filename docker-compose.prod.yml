@@ -41,7 +41,6 @@ services:
 
   pyworker:
     build: ./pyworker
-    networks: [internal]
     image: ghcr.io/cornellev/viz-worker:latest
     environment:
       DB_HOST: db
