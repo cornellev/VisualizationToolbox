@@ -9,6 +9,14 @@ const DEFAULT_STREAM_LIMIT = parseInt(
   process.env.REACT_APP_ROSBAG_CHUNK_SIZE || "250",
   10
 );
+const DEFAULT_BUFFER_LIMIT = parseInt(
+  process.env.REACT_APP_ROSBAG_BUFFER_LIMIT || "250",
+  10
+);
+const DEFAULT_DOWNSAMPLE_PERCENT = parseInt(
+  process.env.REACT_APP_POINTCLOUD_PERCENT || "50",
+  10
+);
 
 export default function DynamicTab() {
   const [bag, setBag] = useState(null);
@@ -16,11 +24,20 @@ export default function DynamicTab() {
   const [topicOptions, setTopicOptions] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [JSONList, setJSONList] = useState([]);
+  const [bufferStartIndex, setBufferStartIndex] = useState(0);
+  const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
+  const [totalFrames, setTotalFrames] = useState(0);
+  const [isStreamComplete, setIsStreamComplete] = useState(false);
+  const [isBufferLoading, setIsBufferLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamStatus, setStreamStatus] = useState("");
   const [streamError, setStreamError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [frameLimit, setFrameLimit] = useState(DEFAULT_STREAM_LIMIT);
+  const [bufferLimit, setBufferLimit] = useState(DEFAULT_BUFFER_LIMIT);
+  const [downsamplePercent, setDownsamplePercent] = useState(
+    Math.min(100, Math.max(1, DEFAULT_DOWNSAMPLE_PERCENT))
+  );
   const toolOptions = [
     { value: "pointcloud", label: "Point Cloud" },
     { value: "raw", label: "Raw Data" },
@@ -28,6 +45,7 @@ export default function DynamicTab() {
   const [selectedTool, setSelectedTool] = useState(toolOptions[0]);
 
   const streamControllerRef = useRef(null);
+  const frameMetaRef = useRef([]);
 
   const handleList = (folderName) => {
     stopStreaming({ silent: true });
@@ -50,6 +68,11 @@ export default function DynamicTab() {
 
   const resetPlayback = () => {
     setJSONList([]);
+    setBufferStartIndex(0);
+    setCurrentFrameIndex(0);
+    setTotalFrames(0);
+    frameMetaRef.current = [];
+    setIsStreamComplete(false);
     setStreamError(null);
     setStreamStatus("");
   };
@@ -62,6 +85,23 @@ export default function DynamicTab() {
     }
     const clamped = Math.max(1, Math.min(5000, value));
     setFrameLimit(clamped);
+  };
+
+  const handleBufferLimitChange = (event) => {
+    const value = Number(event.target.value);
+    if (Number.isNaN(value) || value <= 0) {
+      setBufferLimit(50);
+      return;
+    }
+    const clamped = Math.max(10, Math.min(2000, value));
+    setBufferLimit(clamped);
+  };
+
+  const handleDownsampleChange = (event) => {
+    const value = Number(event.target.value);
+    if (Number.isNaN(value)) return;
+    const clamped = Math.max(1, Math.min(100, value));
+    setDownsamplePercent(clamped);
   };
 
   const handleBagSelect = (opt) => {
@@ -158,10 +198,12 @@ export default function DynamicTab() {
       if (payload.type === "meta") {
         if (payload.status === "complete") {
           setStreamStatus("Stream complete");
+          setIsStreamComplete(true);
         } else if (payload.status === "aborted") {
           setStreamStatus("Stream aborted");
         } else {
-          const topicLabel = payload.topic || selectedTopic?.value || "selected topic";
+          const topicLabel =
+            payload.topic || selectedTopic?.value || "selected topic";
           setStreamStatus(
             `Streaming ${topicLabel}${
               payload.limit ? ` (limit ${payload.limit})` : ""
@@ -175,7 +217,26 @@ export default function DynamicTab() {
         throw new Error(payload.message || "Stream error");
       }
 
-      setJSONList((prev) => [...prev, payload]);
+      const frameIndex = frameMetaRef.current.length;
+      frameMetaRef.current.push({ index: frameIndex, timestamp: payload.timestamp });
+      setTotalFrames(frameIndex + 1);
+
+      setJSONList((prev) => {
+        const next = [...prev, payload];
+        if (bufferLimit > 0 && next.length > bufferLimit) {
+          const overflow = next.length - bufferLimit;
+          setBufferStartIndex((prevStart) => {
+            const newStart = prevStart + overflow;
+            setCurrentFrameIndex((prevIndex) =>
+              prevIndex < newStart ? newStart : prevIndex
+            );
+            return newStart;
+          });
+          return next.slice(overflow);
+        }
+        return next;
+      });
+      setCurrentFrameIndex(frameIndex);
     };
 
     const consumeBuffer = (decoder, reader) => {
@@ -255,6 +316,77 @@ export default function DynamicTab() {
     }
   };
 
+  const loadBufferAtIndex = async (targetIndex) => {
+    if (!bag || !selectedTopic) return false;
+    const metadata = frameMetaRef.current;
+    if (!metadata[targetIndex]) {
+      console.warn("Frame metadata unavailable for index", targetIndex);
+      return false;
+    }
+
+    const chunkSize = bufferLimit || DEFAULT_STREAM_LIMIT;
+    const total = metadata.length;
+    const maxStart = Math.max(total - chunkSize, 0);
+    const startIndex = Math.max(
+      0,
+      Math.min(targetIndex - Math.floor(chunkSize / 2), maxStart)
+    );
+    const cursorTimestamp =
+      startIndex === 0 ? null : metadata[startIndex - 1]?.timestamp;
+
+    const params = new URLSearchParams();
+    params.set("topic", selectedTopic.value);
+    params.set("limit", String(chunkSize));
+    if (cursorTimestamp) {
+      params.set("cursor", cursorTimestamp);
+    }
+
+    setIsBufferLoading(true);
+    stopStreaming({ silent: true });
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/rosbags/${bag}?${params.toString()}`
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load frames (${response.status})`);
+      }
+      const payload = await response.json();
+      const rows = payload.messages || [];
+      setBufferStartIndex(startIndex);
+      setJSONList(rows);
+      setCurrentFrameIndex(targetIndex);
+      setTotalFrames(frameMetaRef.current.length);
+      return true;
+    } catch (error) {
+      console.error("Failed to load frame chunk:", error);
+      setStreamError(error.message || "Failed to load frame chunk");
+      return false;
+    } finally {
+      setIsBufferLoading(false);
+    }
+  };
+
+  const handleFrameChange = async (targetIndex) => {
+    if (typeof targetIndex !== "number" || Number.isNaN(targetIndex)) return;
+    const bufferEnd = bufferStartIndex + (JSONList?.length || 0);
+    if (
+      targetIndex >= bufferStartIndex &&
+      targetIndex < bufferEnd &&
+      JSONList.length
+    ) {
+      setCurrentFrameIndex(targetIndex);
+      return;
+    }
+
+    if (!isStreamComplete) {
+      console.warn("Cannot seek outside buffer until streaming completes");
+      return;
+    }
+
+    await loadBufferAtIndex(targetIndex);
+  };
+
   useEffect(() => {
     fetchBagList();
   }, []);
@@ -267,6 +399,26 @@ export default function DynamicTab() {
     if (!bag) return;
     fetchTopics(bag);
   }, [bag]);
+
+  useEffect(() => {
+    if (!bufferLimit || JSONList.length <= bufferLimit) return;
+    const overflow = JSONList.length - bufferLimit;
+    setJSONList((prev) => prev.slice(overflow));
+    setBufferStartIndex((prevStart) => {
+      const newStart = prevStart + overflow;
+      setCurrentFrameIndex((prevIndex) =>
+        prevIndex < newStart ? newStart : prevIndex
+      );
+      return newStart;
+    });
+  }, [bufferLimit, JSONList.length]);
+
+  useEffect(() => {
+    if (!bufferLimit || bufferLimit <= 0) return;
+    setJSONList((prev) =>
+      prev.length > bufferLimit ? prev.slice(prev.length - bufferLimit) : prev
+    );
+  }, [bufferLimit]);
 
   return (
     <div className="parent">
@@ -293,19 +445,53 @@ export default function DynamicTab() {
           styles={{ menu: (base) => ({ ...base, zIndex: 20 }) }}
         />
 
-        <label className="input-label" htmlFor="frame-limit-input">
-          Max frames per stream
-          <input
-            id="frame-limit-input"
-            type="number"
-            min={1}
-            max={5000}
-            value={frameLimit}
-            onChange={handleFrameLimitChange}
-            disabled={isStreaming}
-          />
-          <small>Applies to the next stream request.</small>
-        </label>
+        <div className="input-grid">
+          <label className="input-label" htmlFor="frame-limit-input">
+            Max frames per stream
+            <input
+              id="frame-limit-input"
+              type="number"
+              min={1}
+              max={5000}
+              value={frameLimit}
+              onChange={handleFrameLimitChange}
+              disabled={isStreaming}
+            />
+            <small>Applies to the next stream request.</small>
+          </label>
+
+          <label className="input-label" htmlFor="buffer-limit-input">
+            Buffer window (frames kept in memory)
+            <input
+              id="buffer-limit-input"
+              type="number"
+              min={10}
+              max={2000}
+              value={bufferLimit}
+              onChange={handleBufferLimitChange}
+            />
+            <small>
+              Playback works inside this rolling window. Larger values consume more
+              RAM.
+            </small>
+          </label>
+
+          <label className="input-label" htmlFor="downsample-percent-input">
+            Downsample (% of points kept per frame)
+            <input
+              id="downsample-percent-input"
+              type="number"
+              min={1}
+              max={100}
+              value={downsamplePercent}
+              onChange={handleDownsampleChange}
+            />
+            <small>
+              100% keeps every point. Lower values decode fewer points for faster
+              playback.
+            </small>
+          </label>
+        </div>
 
         <button
           onClick={startStreaming}
@@ -328,9 +514,12 @@ export default function DynamicTab() {
           {streamError && (
             <div style={{ color: "#ff5252" }}>Error: {streamError}</div>
           )}
+          {isBufferLoading && <div>Loading frame window…</div>}
           {!!JSONList.length && (
             <div>
-              Buffered {JSONList.length} frame{JSONList.length === 1 ? "" : "s"}
+              Buffered {JSONList.length}
+              {bufferLimit ? ` / ${bufferLimit}` : ""} frame
+              {JSONList.length === 1 ? "" : "s"}
             </div>
           )}
         </div>
@@ -346,7 +535,15 @@ export default function DynamicTab() {
         {selectedTool?.value === "raw" ? (
           <RawDataViewer frames={JSONList || []} />
         ) : (
-          <PointCloudPlayer jsonFrames={JSONList || []} />
+          <PointCloudPlayer
+            jsonFrames={JSONList || []}
+            downsamplePercent={downsamplePercent}
+            bufferStartIndex={bufferStartIndex}
+            totalFrames={totalFrames}
+            currentFrameIndex={currentFrameIndex}
+            onFrameChange={handleFrameChange}
+            isBufferLoading={isBufferLoading}
+          />
         )}
       </div>
     </div>

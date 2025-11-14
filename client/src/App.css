@@ -93,6 +93,45 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
+.input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.pointcloud-container {
+  position: relative;
+  color: #f5f7ff;
+}
+
+.pointcloud-container.fullscreen-active {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #0d0f1a;
+  padding: 24px;
+  box-sizing: border-box;
+  z-index: 9999;
+}
+
+.pointcloud-container.fullscreen-active .three-canvas {
+  min-height: calc(100vh - 160px);
+}
+
+.buffer-overlay {
+  position: absolute;
+  bottom: 16px;
+  right: 24px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #f5f7ff;
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+
 .right-pane {
   flex: 1;
   min-height: 85vh;
@@ -184,6 +223,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  color: #f5f7ff;
 }
 
 .raw-viewer__meta {

@@ -1,16 +1,23 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useRef,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import Slider from "@mui/material/Slider";
 import IconButton from "@mui/material/IconButton";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import PauseIcon from "@mui/icons-material/Pause";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 
-const MAX_RENDERED_POINTS = parseInt(
-  process.env.REACT_APP_POINTCLOUD_MAX_POINTS || "120000",
-  10
-);
 const DEFAULT_POINT_COLOR = { r: 0.2, g: 0.8, b: 1 };
+
+const clamp = (value, min = 0, max = 1) =>
+  Math.min(Math.max(value, min), max);
 
 const DATATYPE_READERS = {
   1: (view, offset) => view.getInt8(offset),
@@ -44,10 +51,6 @@ const toBool = (value, fallback = false) => {
   }
   return fallback;
 };
-
-function clamp(value, min = 0, max = 1) {
-  return Math.min(Math.max(value, min), max);
-}
 
 function lerpColor(t) {
   const clamped = clamp(t, 0, 1);
@@ -104,9 +107,13 @@ function normalizePointCloudMessage(raw) {
   return normalized;
 }
 
-function buildGeometryFromSimplePoints(points = []) {
+function buildGeometryFromSimplePoints(points = [], downsampleFraction = 1) {
   if (!points.length) return null;
-  const stride = Math.max(1, Math.floor(points.length / MAX_RENDERED_POINTS));
+  const target = Math.max(
+    10,
+    Math.floor(points.length * clamp(downsampleFraction, 0.01, 1))
+  );
+  const stride = Math.max(1, Math.floor(points.length / target));
   const sampleCount = Math.min(points.length, Math.ceil(points.length / stride));
   const positions = new Float32Array(sampleCount * 3);
   const colors = new Float32Array(sampleCount * 3);
@@ -167,12 +174,12 @@ function createDataViewFromMessage(message) {
   return view;
 }
 
-function decodePointCloudMessage(rawMessage) {
+function decodePointCloudMessage(rawMessage, downsampleFraction = 1) {
   const message = normalizePointCloudMessage(rawMessage);
   if (!message) return null;
 
   if (Array.isArray(message.points)) {
-    return buildGeometryFromSimplePoints(message.points);
+    return buildGeometryFromSimplePoints(message.points, downsampleFraction);
   }
 
   const dataView = createDataViewFromMessage(message);
@@ -198,14 +205,10 @@ function decodePointCloudMessage(rawMessage) {
   const totalPoints = Math.max(0, declaredPoints);
   if (!totalPoints) return null;
 
-  const stride = Math.max(
-    1,
-    Math.floor(totalPoints / Math.max(MAX_RENDERED_POINTS, 1))
-  );
-  const sampleCount = Math.min(
-    totalPoints,
-    Math.ceil(totalPoints / stride)
-  );
+  const fraction = clamp(downsampleFraction, 0.01, 1);
+  const targetPoints = Math.max(10, Math.floor(totalPoints * fraction));
+  const stride = Math.max(1, Math.floor(totalPoints / targetPoints));
+  const sampleCount = Math.min(totalPoints, Math.ceil(totalPoints / stride));
   const positions = new Float32Array(sampleCount * 3);
   const colors = new Float32Array(sampleCount * 3);
   let writeIndex = 0;
@@ -272,7 +275,16 @@ function decodePointCloudMessage(rawMessage) {
   };
 }
 
-export default function PointCloudPlayer({ jsonFrames }) {
+export default function PointCloudPlayer({
+  jsonFrames,
+  downsamplePercent = 100,
+  bufferStartIndex = 0,
+  totalFrames = 0,
+  currentFrameIndex = 0,
+  onFrameChange,
+  isBufferLoading = false,
+}) {
+  const containerRef = useRef(null);
   const mountRef = useRef(null);
   const rendererRef = useRef(null);
   const sceneRef = useRef(null);
@@ -282,12 +294,30 @@ export default function PointCloudPlayer({ jsonFrames }) {
   const axesRef = useRef(null);
   const pointCacheRef = useRef(new Map());
   const animationFrameRef = useRef(null);
+  const previousScrollRef = useRef(0);
 
-  const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [pxSize, setPxSize] = useState(0.05);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const frames = Array.isArray(jsonFrames) ? jsonFrames : [];
+  const downsampleFraction = clamp((downsamplePercent || 100) / 100, 0.01, 1);
+  const bufferLength = frames.length;
+  const bufferEnd = bufferStartIndex + bufferLength;
+  const sliderMaxCandidate = Math.max(
+    totalFrames ? totalFrames - 1 : -Infinity,
+    bufferEnd ? bufferEnd - 1 : -Infinity
+  );
+  const sliderMax = sliderMaxCandidate >= 0 ? sliderMaxCandidate : 0;
+  const clampedGlobalIndex = Math.min(
+    Math.max(currentFrameIndex, 0),
+    sliderMax
+  );
+  const localIndex = bufferLength
+    ? clamp(clampedGlobalIndex - bufferStartIndex, 0, bufferLength - 1)
+    : 0;
+  const frameForDataset = bufferLength ? frames[localIndex] : null;
+  const globalIndexForDataset = bufferStartIndex + localIndex;
 
   useEffect(() => {
     if (!frames.length) {
@@ -296,17 +326,61 @@ export default function PointCloudPlayer({ jsonFrames }) {
   }, [frames.length]);
 
   useEffect(() => {
-    if (frames.length === 0) {
-      setCurrentFrame(0);
+    pointCacheRef.current.clear();
+  }, [downsampleFraction]);
+
+  useEffect(() => {
+    if (isBufferLoading) {
       setIsPlaying(false);
+    }
+  }, [isBufferLoading]);
+
+  const exitFullscreen = useCallback(() => {
+    document.body.style.removeProperty("overflow");
+    setIsFullscreen(false);
+    const y = previousScrollRef.current || 0;
+    window.scrollTo({ top: y });
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (isFullscreen) {
+      exitFullscreen();
       return;
     }
-    setCurrentFrame((prev) =>
-      prev >= frames.length ? frames.length - 1 : prev
-    );
-  }, [frames.length]);
+    previousScrollRef.current = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.style.overflow = "hidden";
+    setIsFullscreen(true);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && isFullscreen) {
+        exitFullscreen();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, exitFullscreen]);
+
+  useEffect(() => {
+    return () => {
+      document.body.style.removeProperty("overflow");
+    };
+  }, []);
 
   // Initialize Three.js scene
+  const updateRendererSize = useCallback(() => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const mountNode = mountRef.current;
+    if (!renderer || !camera || !mountNode) return;
+    const width = mountNode.clientWidth || window.innerWidth || 1;
+    const height = mountNode.clientHeight || window.innerHeight || 1;
+    renderer.setSize(width, height);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  }, []);
+
   useEffect(() => {
     const mountNode = mountRef.current;
     if (!mountNode) return () => {};
@@ -347,19 +421,11 @@ export default function PointCloudPlayer({ jsonFrames }) {
     };
     animate();
 
-    const handleResize = () => {
-      if (!rendererRef.current || !cameraRef.current || !mountRef.current) return;
-      const newWidth = mountRef.current.clientWidth || 1;
-      const newHeight = mountRef.current.clientHeight || 1;
-      rendererRef.current.setSize(newWidth, newHeight);
-      cameraRef.current.aspect = newWidth / newHeight;
-      cameraRef.current.updateProjectionMatrix();
-    };
-
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", updateRendererSize);
+    updateRendererSize();
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", updateRendererSize);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -388,25 +454,29 @@ export default function PointCloudPlayer({ jsonFrames }) {
       sceneRef.current = null;
       cameraRef.current = null;
     };
-  }, []);
+  }, [updateRendererSize]);
+
+  useEffect(() => {
+    updateRendererSize();
+  }, [isFullscreen, updateRendererSize]);
 
   const getCachedDataset = useCallback(
-    (frame, index) => {
+    (frame, index, fraction) => {
       if (!frame) return null;
-      const cacheKey = frame.timestamp || `${index}`;
+      const cacheKey = `${frame.timestamp || index}::${fraction}`;
       if (pointCacheRef.current.has(cacheKey)) {
         return pointCacheRef.current.get(cacheKey);
       }
 
       let dataset = null;
       if (Array.isArray(frame.points)) {
-        dataset = buildGeometryFromSimplePoints(frame.points);
+        dataset = buildGeometryFromSimplePoints(frame.points, fraction);
       } else if (Array.isArray(frame?.data?.points)) {
-        dataset = buildGeometryFromSimplePoints(frame.data.points);
+        dataset = buildGeometryFromSimplePoints(frame.data.points, fraction);
       } else if (frame?.data) {
-        dataset = decodePointCloudMessage(frame.data);
+        dataset = decodePointCloudMessage(frame.data, fraction);
       } else if (frame?._data || frame?._fields) {
-        dataset = decodePointCloudMessage(frame);
+        dataset = decodePointCloudMessage(frame, fraction);
       }
 
       if (dataset && dataset.count > 0) {
@@ -423,9 +493,13 @@ export default function PointCloudPlayer({ jsonFrames }) {
   );
 
   const currentDataset = useMemo(() => {
-    if (!frames.length) return null;
-    return getCachedDataset(frames[currentFrame], currentFrame);
-  }, [frames, currentFrame, getCachedDataset]);
+    if (!frameForDataset) return null;
+    return getCachedDataset(
+      frameForDataset,
+      globalIndexForDataset,
+      downsampleFraction
+    );
+  }, [frameForDataset, globalIndexForDataset, getCachedDataset, downsampleFraction]);
 
   // Render the current frame
   useEffect(() => {
@@ -464,15 +538,27 @@ export default function PointCloudPlayer({ jsonFrames }) {
 
   // Play/pause logic
   useEffect(() => {
-    if (!isPlaying || frames.length === 0) return;
+    if (!isPlaying || isBufferLoading) return;
+    const total = totalFrames || bufferEnd;
+    if (!total) return;
     const interval = setInterval(() => {
-      setCurrentFrame((prev) => (prev + 1) % frames.length);
+      const nextIndex = (clampedGlobalIndex + 1) % total;
+      onFrameChange?.(nextIndex);
     }, 100); // 100ms per frame, adjust as needed
     return () => clearInterval(interval);
-  }, [isPlaying, frames.length]);
+  }, [
+    isPlaying,
+    isBufferLoading,
+    clampedGlobalIndex,
+    totalFrames,
+    bufferEnd,
+    onFrameChange,
+  ]);
 
   return (
     <div
+      ref={containerRef}
+      className={`pointcloud-container${isFullscreen ? " fullscreen-active" : ""}`}
       style={{
         width: "100%",
         minHeight: "70vh",
@@ -483,6 +569,7 @@ export default function PointCloudPlayer({ jsonFrames }) {
     >
       <div
         ref={mountRef}
+        className="three-canvas"
         style={{
           flex: 1,
           width: "100%",
@@ -494,18 +581,24 @@ export default function PointCloudPlayer({ jsonFrames }) {
       <div
         style={{ display: "flex", alignItems: "center", gap: 12, padding: 8 }}
       >
-        <IconButton onClick={() => setIsPlaying(!isPlaying)}>
+        <IconButton
+          onClick={() => setIsPlaying(!isPlaying)}
+          sx={{ color: "#f5f7ff" }}
+        >
           {isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
         </IconButton>
+        <IconButton onClick={toggleFullscreen} sx={{ color: "#f5f7ff" }}>
+          {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+        </IconButton>
         <Slider
-          value={frames.length ? currentFrame : 0}
+          value={sliderMax ? clampedGlobalIndex : 0}
           min={0}
-          max={frames.length ? frames.length - 1 : 0}
+          max={sliderMax}
           onChange={(e, value) => {
-            if (Array.isArray(value)) return;
-            setCurrentFrame(value);
+            if (Array.isArray(value) || !onFrameChange) return;
+            onFrameChange(value);
           }}
-          disabled={!frames.length}
+          disabled={sliderMax === 0 || !onFrameChange || isBufferLoading}
           sx={{ flex: 1, marginLeft: 2 }}
         />
         <Slider
@@ -520,6 +613,9 @@ export default function PointCloudPlayer({ jsonFrames }) {
           sx={{ width: 150, marginLeft: 16 }}
         />
       </div>
+      {isBufferLoading && (
+        <div className="buffer-overlay">Loading frame window…</div>
+      )}
     </div>
   );
 }
