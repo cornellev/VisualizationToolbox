@@ -26,7 +26,9 @@ COPY src/ src/
 
 # Build pigpio from source
 RUN git clone https://github.com/joan2937/pigpio.git /tmp/pigpio && \
-    cd /tmp/pigpio && make && make install && ldconfig && rm -rf /tmp/pigpio
+    cd /tmp/pigpio && make && make install && \
+    (ldconfig || echo "ldconfig failed (likely under qemu), continuing") && \
+    rm -rf /tmp/pigpio
 
 # Build the workspace
 RUN source /opt/ros/humble/setup.bash && colcon build --symlink-install
