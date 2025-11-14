@@ -7,7 +7,7 @@ group "default" {
 
 target "server" {
   context   = "./server"
-  tags      = ["${REGISTRY}/viz-server:${TAG}"]
+  tags      = [for t in split(",", TAG) : "${REGISTRY}/viz-server:${t}"]
   platforms = ["linux/amd64"]
   labels = {
     "org.opencontainers.image.source" = "https://github.com/cornellev/VisualizationToolbox"
@@ -17,7 +17,7 @@ target "server" {
 
 target "client" {
   context   = "./client"
-  tags      = ["${REGISTRY}/viz-client:${TAG}"]
+  tags      = [for t in split(",", TAG) : "${REGISTRY}/viz-client:${t}"]
   platforms = ["linux/amd64"]
   labels = {
     "org.opencontainers.image.source" = "https://github.com/cornellev/VisualizationToolbox"
@@ -27,7 +27,7 @@ target "client" {
 
 target "worker" {
   context   = "./pyworker"
-  tags      = ["${REGISTRY}/viz-worker:${TAG}"]
+  tags      = [for t in split(",", TAG) : "${REGISTRY}/viz-worker:${t}"]
   platforms = ["linux/amd64"]
   labels = {
     "org.opencontainers.image.source" = "https://github.com/cornellev/VisualizationToolbox"
