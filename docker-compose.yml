@@ -11,6 +11,7 @@ services:
       - CHOKIDAR_USEPOLLING=true
       - WATCHPACK_POLLING=true
       - WDS_SOCKET_PORT=3000
+      - HOST=${HOST}
     volumes:
       - ./client:/app
       - /app/node_modules

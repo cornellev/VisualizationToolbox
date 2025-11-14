@@ -3,7 +3,7 @@ import Select from "react-select";
 import UploadCsv from "./UploadCsv";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = process.env.REACT_APP_EV_URL || "http://localhost:8000/ev/";
+const EV_URL = `http://${process.env.HOST}:8000/ev/`;
 
 export default function StaticTab() {
   const [csvList, setCsvList] = useState([]);

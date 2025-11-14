@@ -21,7 +21,7 @@ function UploadBag({ onUploadComplete, loading }) {
         console.log("Uploading file:", file);
       }
 
-      const response = await fetch("http://localhost:5000/upload-folder", {
+      const response = await fetch(`http://${process.env.HOST}:5000/upload-folder`, {
         method: "POST",
         body: formData,
       });

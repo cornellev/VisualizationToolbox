@@ -19,7 +19,7 @@ function UploadCSV({ onUploadComplete, loading }) {
 
       console.log("Uploading CSV file:", file.name);
 
-      const response = await fetch("http://localhost:5000/upload-csv", {
+      const response = await fetch(`http://${process.env.HOST}:5000/upload-csv`, {
         method: "POST",
         body: formData,
       });

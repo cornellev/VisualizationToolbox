@@ -22,7 +22,7 @@ services:
     image: ghcr.io/cornellev/viz-client:latest
     networks: [internal]
     environment:
-      REACT_APP_EV_URL: ${REACT_APP_EV_URL}
+      HOST: ${HOST}
 
   server:
     image: ghcr.io/cornellev/viz-server:latest
@@ -41,8 +41,7 @@ services:
 
   pyworker:
     build: ./pyworker
-    ports:
-      - "8000:8000"
+    networks: [internal]
     image: ghcr.io/cornellev/viz-worker:latest
     environment:
       DB_HOST: db
