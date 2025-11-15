@@ -1,6 +1,8 @@
 import React, { useRef } from "react";
 import "./UploadBag.css";
 
+const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
+
 function UploadBag({ onUploadComplete, loading }) {
   const fileInputRef = useRef(null);
 
@@ -21,13 +23,13 @@ function UploadBag({ onUploadComplete, loading }) {
         console.log("Uploading file:", file);
       }
 
-      const response = await fetch(`http://${process.env.HOST}:5000/upload-folder`, {
+      const response = await fetch(`${API_BASE}/upload-folder`, {
         method: "POST",
         body: formData,
       });
 
       const data = await response.json();
-      onUploadComplete(data.folderName);
+      onUploadComplete(data.folder);
     } catch (err) {
       console.error("Error uploading files:", err);
     } finally {

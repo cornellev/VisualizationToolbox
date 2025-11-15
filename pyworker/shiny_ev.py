@@ -210,10 +210,17 @@ def server(input, output, session):
                 resp.raise_for_status()
 
                 js = resp.json()
-                print(f"[DEBUG] ROSBag API returned type={type(js)}, len={len(js) if isinstance(js, list) else 'N/A'}")
-                if isinstance(js, list) and len(js) > 0:
-                    print(f"[DEBUG] First item sample: {js[0]}")
-                data = js  # always a list of {topic, timestamp, data}
+                if isinstance(js, dict) and "messages" in js:
+                    data = js.get("messages", [])
+                else:
+                    data = js
+
+                print(
+                    f"[DEBUG] ROSBag API returned type={type(data)}, len={len(data) if isinstance(data, list) else 'N/A'}"
+                )
+                if isinstance(data, list) and len(data) > 0:
+                    print(f"[DEBUG] First item sample: {data[0]}")
+
                 if not isinstance(data, list) or not data:
                     print("[WARN] Unexpected or empty ROSBag response format")
                     return None

@@ -1,6 +1,8 @@
 import React, { useRef } from "react";
 import "./UploadBag.css"; // Reuse the same CSS for consistent styling
 
+const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
+
 function UploadCSV({ onUploadComplete, loading }) {
   const fileInputRef = useRef(null);
 
@@ -19,7 +21,7 @@ function UploadCSV({ onUploadComplete, loading }) {
 
       console.log("Uploading CSV file:", file.name);
 
-      const response = await fetch(`http://${process.env.HOST}:5000/upload-csv`, {
+      const response = await fetch(`${API_BASE}/upload-csv`, {
         method: "POST",
         body: formData,
       });

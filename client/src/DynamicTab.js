@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Select from "react-select";
 import UploadBag from "./UploadBag";
 import PointCloudPlayer from "./PointCloudPlayer";
@@ -21,6 +21,7 @@ const DEFAULT_DOWNSAMPLE_PERCENT = parseInt(
 export default function DynamicTab() {
   const [bag, setBag] = useState(null);
   const [bagList, setBagList] = useState(null);
+  const [selectedBag, setSelectedBag] = useState(null);
   const [topicOptions, setTopicOptions] = useState([]);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [JSONList, setJSONList] = useState([]);
@@ -46,11 +47,17 @@ export default function DynamicTab() {
 
   const streamControllerRef = useRef(null);
   const frameMetaRef = useRef([]);
+  const replayInitializedRef = useRef(false);
 
-  const handleList = (folderName) => {
+  const handleList = async (folderName) => {
     stopStreaming({ silent: true });
-    setBag(folderName);
     resetPlayback();
+    await fetchBagList();
+    const option = folderName
+      ? { label: folderName, value: folderName }
+      : null;
+    setSelectedBag(option);
+    setBag(folderName || null);
   };
   const handleLoad = (state) => setIsLoading(state);
 
@@ -75,6 +82,7 @@ export default function DynamicTab() {
     setIsStreamComplete(false);
     setStreamError(null);
     setStreamStatus("");
+    replayInitializedRef.current = false;
   };
 
   const handleFrameLimitChange = (event) => {
@@ -117,7 +125,7 @@ export default function DynamicTab() {
     resetPlayback();
   };
 
-  const fetchBagList = async () => {
+  const fetchBagList = useCallback(async () => {
     try {
       const response = await fetch(API_BASE + "/api/rosbags");
       const data = await response.json();
@@ -129,7 +137,7 @@ export default function DynamicTab() {
     } catch (error) {
       console.error("Failed to fetch bag list:", error);
     }
-  };
+  }, []);
 
   const fetchTopics = async (folderName) => {
     if (!folderName) {
@@ -389,7 +397,7 @@ export default function DynamicTab() {
 
   useEffect(() => {
     fetchBagList();
-  }, []);
+  }, [fetchBagList]);
 
   useEffect(() => {
     return () => stopStreaming({ silent: true });
@@ -412,6 +420,26 @@ export default function DynamicTab() {
       return newStart;
     });
   }, [bufferLimit, JSONList.length]);
+
+  useEffect(() => {
+    if (
+      isStreamComplete &&
+      totalFrames > 0 &&
+      !replayInitializedRef.current
+    ) {
+      replayInitializedRef.current = true;
+      if (bufferStartIndex === 0) {
+        setCurrentFrameIndex(0);
+      } else {
+        loadBufferAtIndex(0);
+      }
+    }
+  }, [
+    isStreamComplete,
+    totalFrames,
+    bufferStartIndex,
+    loadBufferAtIndex,
+  ]);
 
   useEffect(() => {
     if (!bufferLimit || bufferLimit <= 0) return;

@@ -3,7 +3,9 @@ import Select from "react-select";
 import UploadCsv from "./UploadCsv";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = `http://${process.env.HOST}:8000/ev/`;
+const EV_URL = `/ev/`;
+
+const isAbsoluteUrl = (url) => /^https?:\/\//i.test(url);
 
 export default function StaticTab() {
   const [csvList, setCsvList] = useState([]);
@@ -89,7 +91,9 @@ export default function StaticTab() {
         console.log("Sending CSV name to Shiny:", selectedCsv.value);
 
         // Extract only the origin (scheme + host + port)
-        const shinyOrigin = new URL(EV_URL).origin;
+        const shinyOrigin = isAbsoluteUrl(EV_URL)
+          ? new URL(EV_URL).origin
+          : window.location.origin;
         console.log("iframe origin:", iframe.src);
 
         iframe.contentWindow.postMessage(
@@ -122,7 +126,9 @@ export default function StaticTab() {
         setIsLoading(false);
         console.log("Sending ROSBag + topic to Shiny:", selectedBag.value, selectedTopic.value);
 
-        const shinyOrigin = new URL(EV_URL).origin;
+        const shinyOrigin = isAbsoluteUrl(EV_URL)
+          ? new URL(EV_URL).origin
+          : window.location.origin;
         iframe.contentWindow.postMessage(
           { type: "load_rosbag", bag: selectedBag.value, topic: selectedTopic.value },
           shinyOrigin
