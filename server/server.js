@@ -40,6 +40,25 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+const sanitizeSegment = (name = "") => {
+  return (
+    name
+      .normalize("NFKD")
+      .replace(/[^a-zA-Z0-9-_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80) || "rosbag"
+  );
+};
+
+const timestampSuffix = () => {
+  const now = new Date();
+  const pad = (num) => num.toString().padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate()
+  )}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+};
+
 app.post("/upload-folder", upload.array("files"), async (req, res) => {
   if (!req.files || req.files.length < 2) {
     return res.status(400).send("Need at least a YAML and DB3 file");
@@ -48,7 +67,12 @@ app.post("/upload-folder", upload.array("files"), async (req, res) => {
   const db3File = req.files.find((f) => f.originalname.endsWith(".db3"));
   if (!db3File) return res.status(400).send("No .db3 file found");
 
-  const folderName = path.parse(db3File.originalname).name;
+  const requestedFolder = req.body?.folderName
+    ? req.body.folderName.trim()
+    : null;
+  const baseName =
+    requestedFolder || path.parse(db3File.originalname).name || "rosbag";
+  const folderName = `${sanitizeSegment(baseName)}__${timestampSuffix()}`;
   const finalFolderPath = path.join("uploads-folder", folderName);
   const pyworkerUrl = process.env.PYWORKER_URL || "http://pyworker:8000";
 

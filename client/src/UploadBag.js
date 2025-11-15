@@ -16,12 +16,18 @@ function UploadBag({ onUploadComplete, loading }) {
         return;
       }
       const formData = new FormData();
+      const firstFile = files[0];
+      const inferredFolder =
+        firstFile?.webkitRelativePath?.split("/")?.[0] ||
+        firstFile?.name?.replace(/\.(bag|db3)$/i, "") ||
+        "rosbag";
 
       for (const file of files) {
         formData.append("files", file);
-
-        console.log("Uploading file:", file);
+        console.log("Uploading file:", file.webkitRelativePath || file.name);
       }
+
+      formData.append("folderName", inferredFolder);
 
       const response = await fetch(`${API_BASE}/upload-folder`, {
         method: "POST",
