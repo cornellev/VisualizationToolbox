@@ -32,6 +32,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
       DB_PORT: 5432
+      PYWORKER_BATCH_SIZE: ${PYWORKER_BATCH_SIZE:-500}
+      PYWORKER_BATCH_BYTES: ${PYWORKER_BATCH_BYTES:-10485760}
       PYWORKER_URL: http://pyworker:8000
     volumes:
       - uploads-folder:/app/uploads-folder

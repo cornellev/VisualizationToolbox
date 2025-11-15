@@ -21,6 +21,8 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "mypass")
 DB_NAME = os.getenv("DB_NAME", "cat_db")
 DB_PORT = int(os.getenv("DB_PORT", 5432))
+PYWORKER_BATCH_SIZE = int(os.getenv("PYWORKER_BATCH_SIZE", "500"))
+PYWORKER_BATCH_BYTES = int(os.getenv("PYWORKER_BATCH_BYTES", str(10 * 1024 * 1024)))
 
 max_retries = 10
 for attempt in range(max_retries):
@@ -92,9 +94,32 @@ def msg_to_dict(msg, headers=None):
         return msg
 
 
+def flush_batch(cur, conn, batch):
+    if not batch:
+        return 0
+    execute_batch(
+        cur,
+        "INSERT INTO rosbag_messages (bag_name, topic, timestamp, data) VALUES (%s, %s, %s, %s)",
+        batch,
+    )
+    conn.commit()
+    inserted = len(batch)
+    batch.clear()
+    return inserted
 
-def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
+
+
+def bag_to_postgres(
+    bag_path,
+    bag_name,
+    conn,
+    yaml_path=None,
+    batch_size=PYWORKER_BATCH_SIZE,
+    batch_bytes_limit=PYWORKER_BATCH_BYTES,
+):
     cur = conn.cursor()
+    batch_size = max(1, batch_size)
+    batch_bytes_limit = max(0, batch_bytes_limit or 0)
     yaml_data = None
     if yaml_path and os.path.exists(yaml_path):
         with open(yaml_path, "r") as f:
@@ -119,6 +144,7 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
         topic_types[topic_metadata.name] = (topic_metadata.type, get_message(topic_metadata.type))
 
     batch = []
+    batch_bytes = 0
     total_msgs = 0
 
     while reader.has_next():
@@ -131,26 +157,19 @@ def bag_to_postgres(bag_path, bag_name, conn, yaml_path=None, batch_size=500):
 
         # Always store in rosbag_messages
         batch.append((bag_name, topic, t, msg_json))
+        batch_bytes += len(msg_json.encode("utf-8"))
 
-        if len(batch) >= batch_size:
-            execute_batch(
-                cur,
-                "INSERT INTO rosbag_messages (bag_name, topic, timestamp, data) VALUES (%s, %s, %s, %s)",
-                batch,
-            )
-            conn.commit()
-            total_msgs += len(batch)
+        should_flush = len(batch) >= batch_size
+        if batch_bytes_limit and batch_bytes >= batch_bytes_limit:
+            should_flush = True
+
+        if should_flush:
+            total_msgs += flush_batch(cur, conn, batch)
+            batch_bytes = 0
             print(f"Inserted {total_msgs} messages...")
-            batch.clear()
 
     if batch:
-        execute_batch(
-            cur,
-            "INSERT INTO rosbag_messages (bag_name, topic, timestamp, data) VALUES (%s, %s, %s, %s)",
-            batch,
-        )
-        conn.commit()
-        total_msgs += len(batch)
+        total_msgs += flush_batch(cur, conn, batch)
 
     cur.close()
 
