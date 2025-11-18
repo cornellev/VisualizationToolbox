@@ -113,8 +113,7 @@ CLICK_JS = """
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.h2("Run Analysis"),
-        ui.h4("Plot options"),
+        ui.h3("Run Analysis"),
         ui.input_select("plot_type", "Plot type", choices=["line", "scatter"], selected="line"),
         ui.hr(),
         ui.h4("Select axes"),
@@ -128,6 +127,38 @@ app_ui = ui.page_sidebar(
         ui.input_numeric("ymax", "Y max", value=None),
         open="open",
     ),
+    ui.tags.style(
+        """
+        body, .sidebar, .card, .card-header, .btn, label, input, select {
+            font-size: 0.85rem !important;
+        }
+         .sidebar h4 {
+            margin-top: 0.2rem !important;
+            margin-bottom: 0.1rem !important;
+            font-size: 1rem !important;
+        }
+        .card {
+            padding: 0.1rem !important;
+            margin-bottom: 0.3rem !important;
+        }
+        .card-header {
+            padding: 0.2rem !important;
+            margin-bottom: 0.2rem !important;
+            font-size: 0.9rem !important;
+        }
+        .parent div {
+            gap: 0.5rem !important;
+        }
+        .card-body, .card-content, .shiny-output-error {
+            padding: 0.5rem !important;
+        }
+
+        .btn {
+            padding: 4px 6px !important;
+        }
+        """
+    ),
+
     ui.tags.head(
             ui.tags.script({"defer": True, "src": "https://cdn.plot.ly/plotly-2.29.1.min.js"}),
             ui.tags.script(ui.HTML(POSTMESSAGE_JS)),
