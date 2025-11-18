@@ -126,10 +126,6 @@ app_ui = ui.page_sidebar(
         ui.input_numeric("xmax", "X max", value=None),
         ui.input_numeric("ymin", "Y min", value=None),
         ui.input_numeric("ymax", "Y max", value=None),
-        ui.hr(),
-        ui.h4("Pick Two Points"),
-        ui.input_action_button("reset_sel", "Reset selection"),
-        ui.output_text("sel_points"),
         open="open",
     ),
     ui.tags.head(
@@ -148,10 +144,17 @@ app_ui = ui.page_sidebar(
             ),
         ui.card(
             ui.card_header("Results"),
+            ui.input_action_button(
+                "reset_sel",
+                "Reset selection",
+                class_="btn btn-secondary",
+                style="width: 20%"
+            ),
+            ui.output_text("sel_points"),
             ui.output_text("delta_x"),
             ui.output_text("delta_y"),
             ui.output_text("slope"),
-            style="height: auto !important;"
+    style="height: auto !important;"
         ),
         style="display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start;"
     ),
@@ -288,13 +291,20 @@ def server(input, output, session):
     @render.text
     def sel_points():
         pts = selected_points.get()
-        if not pts:
+        if pts is None or len(pts) == 0:
             return "No points selected. Click two points on the plot."
+
         if len(pts) == 1:
             p = pts[0]
-            return f"Point 1: (x={p['x']}, y={p['y']}) — click a second point."
-        p1, p2 = pts
-        return f"Point 1: (x={p1['x']}, y={p1['y']}), Point 2: (x={p2['x']}, y={p2['y']})"
+            return f"Point 1: (x={p['x']:.3f}, y={p['y']:.3f}) — click a second point."
+
+        if len(pts) >= 2:
+            p1, p2 = pts[-2], pts[-1]
+            return (
+                f"Point 1: (x={p1['x']:.3f}, y={p1['y']:.3f})\n"
+                f"Point 2: (x={p2['x']:.3f}, y={p2['y']:.3f})"
+            )
+        return "No points selected."
 
     @render.text
     def delta_x():
