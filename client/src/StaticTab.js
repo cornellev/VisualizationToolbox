@@ -3,7 +3,7 @@ import Select from "react-select";
 import UploadCsv from "./UploadCsv";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = `/ev/`;
+const EV_URL = `${(process.env.REACT_APP_SHINY_URL || "/ev/").replace(/\/+$/, "")}/`;
 
 const isAbsoluteUrl = (url) => /^https?:\/\//i.test(url);
 

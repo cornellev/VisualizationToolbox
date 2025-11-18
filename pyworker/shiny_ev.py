@@ -6,6 +6,7 @@ from math import isinf
 import os
 import requests 
 from urllib.parse import urlparse, parse_qs
+import shinyswatch
 
 API_BASE = os.getenv("API_BASE", "http://server:5000")
 
@@ -112,7 +113,7 @@ CLICK_JS = """
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.h2("Run Data Analysis"),
+        ui.h2("Run Analysis"),
         ui.h4("Plot options"),
         ui.input_select("plot_type", "Plot type", choices=["line", "scatter"], selected="line"),
         ui.hr(),
@@ -131,28 +132,30 @@ app_ui = ui.page_sidebar(
         ui.output_text("sel_points"),
         open="open",
     ),
-    
-    ui.layout_column_wrap(
-        ui.tags.head(
+    ui.tags.head(
             ui.tags.script({"defer": True, "src": "https://cdn.plot.ly/plotly-2.29.1.min.js"}),
             ui.tags.script(ui.HTML(POSTMESSAGE_JS)),
-            ui.tags.script(ui.HTML(CLICK_JS))
+            ui.tags.script(ui.HTML(CLICK_JS)),
         ),
-        ui.card(ui.card_header("Preview"), ui.output_ui("preview")),
+    
+    ui.tags.div(
+        ui.card(ui.card_header("Preview"), ui.output_ui("preview"), style="height: auto !important;"),
         ui.card(
         ui.card_header("Reactive plot"),
-        ui.output_ui("plot_title_ui"),  # dynamically shown title input
-        ui.output_ui("plot")
+        ui.output_ui("plot_title_ui"), 
+        ui.output_ui("plot"),
+        style="height: auto !important;"
             ),
         ui.card(
             ui.card_header("Results"),
             ui.output_text("delta_x"),
             ui.output_text("delta_y"),
             ui.output_text("slope"),
+            style="height: auto !important;"
         ),
-        width=1/1,
+        style="display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start;"
     ),
-
+    theme=shinyswatch.theme.darkly,
 )
 
 from urllib.parse import quote
@@ -230,6 +233,11 @@ def server(input, output, session):
                 df.columns = [c.replace("data_", "") for c in df.columns]
                 df.columns = [c.strip().lower() for c in df.columns]
 
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce')
+                    first_timestamp = df['timestamp'].min()
+                    df['normalized_time'] = (df['timestamp'] - first_timestamp) / 1e9
+
                 print(f"[INFO] Loaded ROSBag '{bag_name.get()}' with {len(df)} rows and {len(df.columns)} columns")
                 print(f"[DEBUG] Columns: {list(df.columns)[:10]}...")
 
@@ -245,7 +253,7 @@ def server(input, output, session):
     def preview():
         d = df()
         if d is None or d.empty:
-            return ui.p("Waiting for CSV data...")
+            return ui.p("Waiting for data...")
         styled_html = d.head(20).to_html(
             index=False, border=1, justify="center",
             classes="table table-striped table-bordered table-sm"
@@ -313,9 +321,7 @@ def server(input, output, session):
         if d is None or d.empty:
             return ui.input_select("xcol", "X Axis", choices=[])
         num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
-        preferred = ["timestamp", "time", "ros_time_sec", "dist", "distance"]
-        default = next((c for c in preferred if c in num_cols), num_cols[0] if num_cols else None)
-        return ui.input_select("xcol", "X Axis", choices=num_cols, selected=default)
+        return ui.input_select("xcol", "X Axis", choices=num_cols)
 
     @render.ui
     def y_select():
@@ -323,9 +329,7 @@ def server(input, output, session):
         if d is None or d.empty:
             return ui.input_selectize("ycols", "Y Axis", choices=[], multiple=True)
         num_cols = [c for c in d.columns if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
-        preferred = ["bus_voltage", "current", "power", "speed", "energy"]
-        defaults = [c for c in preferred if c in num_cols] or num_cols[:1]
-        return ui.input_selectize("ycols", "Y Axis", choices=num_cols, selected=defaults, multiple=True)
+        return ui.input_selectize("ycols", "Y Axis", choices=num_cols, multiple=True)
 
     @render.ui
     def plot_title_ui():
@@ -342,7 +346,7 @@ def server(input, output, session):
     def plot():
         d = df()
         if d is None or d.empty:
-            return ui.HTML("Waiting for CSV data...")
+            return ui.HTML("Waiting for data...")
 
         numeric_cols = [c for c in d.columns
                         if pd.api.types.is_numeric_dtype(pd.to_numeric(d[c], errors="coerce"))]
