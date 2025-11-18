@@ -3,7 +3,10 @@ import Select from "react-select";
 import UploadCsv from "./UploadCsv";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "").replace(/\/$/, "");
-const EV_URL = `${(process.env.REACT_APP_SHINY_URL || "/ev/").replace(/\/+$/, "")}/`;
+const EV_URL = `${(process.env.REACT_APP_SHINY_URL || "/ev/").replace(
+  /\/+$/,
+  ""
+)}/`;
 
 const isAbsoluteUrl = (url) => /^https?:\/\//i.test(url);
 
@@ -62,7 +65,9 @@ export default function StaticTab() {
     const fetchTopics = async () => {
       if (!selectedBag) return;
       try {
-        const response = await fetch(`${API_BASE}/api/rosbags/${selectedBag.value}/topics`);
+        const response = await fetch(
+          `${API_BASE}/api/rosbags/${selectedBag.value}/topics`
+        );
         const data = await response.json();
         setTopics(data.topics.map((t) => ({ label: t, value: t })));
       } catch (err) {
@@ -124,19 +129,31 @@ export default function StaticTab() {
 
       iframe.onload = () => {
         setIsLoading(false);
-        console.log("Sending ROSBag + topic to Shiny:", selectedBag.value, selectedTopic.value);
+        console.log(
+          "Sending ROSBag + topic to Shiny:",
+          selectedBag.value,
+          selectedTopic.value
+        );
 
         const shinyOrigin = isAbsoluteUrl(EV_URL)
           ? new URL(EV_URL).origin
           : window.location.origin;
         iframe.contentWindow.postMessage(
-          { type: "load_rosbag", bag: selectedBag.value, topic: selectedTopic.value },
+          {
+            type: "load_rosbag",
+            bag: selectedBag.value,
+            topic: selectedTopic.value,
+          },
           shinyOrigin
         );
 
         // fallback
         iframe.contentWindow.postMessage(
-          { type: "load_rosbag", bag: selectedBag.value, topic: selectedTopic.value },
+          {
+            type: "load_rosbag",
+            bag: selectedBag.value,
+            topic: selectedTopic.value,
+          },
           "*"
         );
       };
@@ -144,91 +161,116 @@ export default function StaticTab() {
   };
 
   return (
-    <div className="parent">
-      <div className="left-pane">
-        {/* CSV Upload Section */}
-        <h3 style={{ color: "white", marginBottom: "12px" }}>
-          CSV Upload & Visualization
-        </h3>
+    <>
+      {/* Compact styling injected directly */}
+      <style>
+        {`
+        .left-pane {
+          font-size: 0.85rem; 
+        }
+        .left-pane h3 {
+          font-size: 1rem;
+        }
+        .button-css {
+          font-size: 0.8rem;
+          padding: 6px 10px;
+        }
+        .error-text {
+          font-size: 0.8rem;
+        }
+        .left-pane .Select__control,
+        .left-pane .react-select__control {
+          font-size: 0.85rem;
+        }
+      `}
+      </style>
 
-        <UploadCsv
-          onUploadComplete={() => {
-            fetchCsvList();
-          }}
-          loading={setIsLoading}
-        />
+      <div className="parent">
+        <div className="left-pane">
+          {/* CSV Upload Section */}
+          <h3 style={{ color: "white", marginBottom: "12px" }}>
+            CSV Upload & Visualization
+          </h3>
 
-        <Select
-          options={csvList}
-          value={selectedCsv}
-          onChange={setSelectedCsv}
-          isDisabled={isLoading}
-          placeholder="Select a CSV file"
-          styles={{
-            container: (base) => ({ ...base, marginTop: "10px" }),
-          }}
-        />
+          <UploadCsv
+            onUploadComplete={() => {
+              fetchCsvList();
+            }}
+            loading={setIsLoading}
+          />
 
-        <button
-          onClick={handleVisualize}
-          className="button-css"
-          disabled={!selectedCsv || isLoading}
-        >
-          {isLoading ? "Loading..." : "Fetch & Visualize CSV"}
-        </button>
+          <Select
+            options={csvList}
+            value={selectedCsv}
+            onChange={setSelectedCsv}
+            isDisabled={isLoading}
+            placeholder="Select a CSV file"
+            styles={{
+              container: (base) => ({ ...base, marginTop: "10px" }),
+            }}
+          />
 
-        {/* ROSBag Section */}
-        <h3 style={{ color: "white", margin: "20px 0 12px 0" }}>
-          ROSBag Visualization
-        </h3>
-
-        <Select
-          options={bagList}
-          value={selectedBag}
-          onChange={setSelectedBag}
-          isDisabled={isLoading}
-          placeholder="Select a ROSBag"
-        />
-
-        <Select
-          options={topics}
-          value={selectedTopic}
-          onChange={setSelectedTopic}
-          isDisabled={!selectedBag || isLoading}
-          placeholder="Select a Topic"
-        />
-        <button
-          onClick={handleRosbagVisualize}
-          className="button-css"
-          disabled={!selectedBag || !selectedTopic || isLoading}
-        >
-
-          {isLoading ? "Loading..." : "Fetch & Visualize ROSBag"}
-        </button>
-
-        {isLoading && <div className="spinner" />}
-        {error && (
-          <div
-            className="error-text"
-            style={{ color: "red", marginTop: "10px" }}
+          <button
+            onClick={handleVisualize}
+            className="button-css"
+            disabled={!selectedCsv || isLoading}
           >
-            {error}
-          </div>
-        )}
-      </div>
+            {isLoading ? "Loading..." : "Fetch & Visualize CSV"}
+          </button>
 
-      <div className="right-pane">
-        <iframe
-          title="Run Data Analysis"
-          src={EV_URL}
-          style={{
-            width: "100%",
-            height: "100%",
-            border: "none",
-            background: "#fff",
-          }}
-        />
+          {/* ROSBag Section */}
+          <h3 style={{ color: "white", margin: "20px 0 12px 0" }}>
+            ROSBag Visualization
+          </h3>
+
+          <Select
+            options={bagList}
+            value={selectedBag}
+            onChange={setSelectedBag}
+            isDisabled={isLoading}
+            placeholder="Select a ROSBag"
+          />
+
+          <Select
+            options={topics}
+            value={selectedTopic}
+            onChange={setSelectedTopic}
+            isDisabled={!selectedBag || isLoading}
+            placeholder="Select a Topic"
+          />
+
+          <button
+            onClick={handleRosbagVisualize}
+            className="button-css"
+            disabled={!selectedBag || !selectedTopic || isLoading}
+          >
+            {isLoading ? "Loading..." : "Fetch & Visualize ROSBag"}
+          </button>
+
+          {isLoading && <div className="spinner" />}
+          {error && (
+            <div
+              className="error-text"
+              style={{ color: "red", marginTop: "10px" }}
+            >
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="right-pane">
+          <iframe
+            title="Run Data Analysis"
+            src={EV_URL}
+            style={{
+              width: "100%",
+              height: "100%",
+              border: "none",
+              background: "#fff",
+            }}
+          />
+        </div>
       </div>
-    </div>
+    </>
   );
 }

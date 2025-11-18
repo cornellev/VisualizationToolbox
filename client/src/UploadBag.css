@@ -2,9 +2,9 @@
   background-color: #0039a2; /* Green background */
   color: white; /* White text */
   padding: 12px 24px; /* Padding for size */
-  font-size: 16px; /* Font size */
+  font-size: 14px; /* Font size */
   border: none; /* Remove border */
-  border-radius: 8px; /* Rounded corners */
+  border-radius: 6px; /* Rounded corners */
   cursor: pointer; /* Pointer cursor on hover */
   transition: background-color 0.2s ease, transform 0.1s ease; /* Smooth transitions */
 }

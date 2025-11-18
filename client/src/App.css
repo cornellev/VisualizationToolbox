@@ -60,11 +60,11 @@
 .left-pane {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px;
+  gap: 12px;
+  padding: 18px;
   background: rgba(15, 23, 42, 0.45);
   border-radius: 16px;
-  max-width: 360px;
+  max-width: 330px;
   width: 100%;
   box-sizing: border-box;
 }
