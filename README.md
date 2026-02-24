@@ -28,8 +28,7 @@ Workflows are divided into:
 
 ### Frontend
 - React.js: Displays visualizations, manages user interactions, and communicates with backend APIs.
-- Shiny for Python: Provides the static visualization interface for CSV and parsed ROSBag data### Backend
-Python, Node.js, Express.js, PostgreSQL
+- Shiny for Python: Provides the static visualization interface for CSV and parsed ROSBag data
 
 ### Backend
 Python (PyWorker):
